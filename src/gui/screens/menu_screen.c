@@ -11,6 +11,7 @@ void gui_screen_menu(struct ChessApp* app) {
     float sh = (float)GetScreenHeight();
     float panel_w = sw * 0.56f;
     float panel_h = sh * 0.72f;
+    float panel_min_h;
     Rectangle panel;
     char profile_line[128];
     Rectangle single_btn;
@@ -18,6 +19,7 @@ void gui_screen_menu(struct ChessApp* app) {
     Rectangle online_btn;
     Rectangle resume_btn;
     Rectangle settings_btn;
+    Rectangle exit_btn;
     bool has_resume = (app->mode == MODE_ONLINE && app->online_match_active);
 
     if (panel_w < 520.0f) {
@@ -26,11 +28,12 @@ void gui_screen_menu(struct ChessApp* app) {
     if (panel_w > 760.0f) {
         panel_w = 760.0f;
     }
-    if (panel_h < 480.0f) {
-        panel_h = 480.0f;
+    panel_min_h = has_resume ? 620.0f : 560.0f;
+    if (panel_h < panel_min_h) {
+        panel_h = panel_min_h;
     }
-    if (panel_h > 700.0f) {
-        panel_h = 700.0f;
+    if (panel_h > 740.0f) {
+        panel_h = 740.0f;
     }
 
     panel = (Rectangle){
@@ -62,6 +65,7 @@ void gui_screen_menu(struct ChessApp* app) {
     online_btn = (Rectangle){panel.x + 42.0f, panel.y + 326.0f, panel.width - 84.0f, 58.0f};
     resume_btn = (Rectangle){panel.x + 42.0f, panel.y + 397.0f, panel.width - 84.0f, 58.0f};
     settings_btn = (Rectangle){panel.x + 42.0f, panel.y + (has_resume ? 468.0f : 397.0f), panel.width - 84.0f, 58.0f};
+    exit_btn = (Rectangle){panel.x + 42.0f, panel.y + (has_resume ? 539.0f : 468.0f), panel.width - 84.0f, 52.0f};
 
     if (gui_button(single_btn, "Single Player")) {
         if (app->online_match_active) {
@@ -94,11 +98,18 @@ void gui_screen_menu(struct ChessApp* app) {
         app->screen = SCREEN_SETTINGS;
     }
 
+    if (gui_button(exit_btn, "Exit")) {
+        if (app->online_match_active) {
+            app_online_end_match(app, true);
+        }
+        app->exit_requested = true;
+    }
+
     if (has_resume) {
         gui_draw_text(app->online_runtime_status,
-                 (int)panel.x + 42,
-                 (int)panel.y + panel.height - 48,
-                 18,
-                 palette->text_secondary);
+                      (int)panel.x + 42,
+                      (int)panel.y + panel.height - 28,
+                      18,
+                      palette->text_secondary);
     }
 }

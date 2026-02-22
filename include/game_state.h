@@ -56,6 +56,7 @@ typedef struct ChessApp {
     float move_anim_duration;
 
     bool leave_confirm_open;
+    bool exit_requested;
 
     char move_log[MOVE_LOG_MAX][64];
     int move_log_count;

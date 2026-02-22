@@ -252,9 +252,13 @@ int run_main_loop(void) {
         }
 
         EndDrawing();
+
+        if (app.exit_requested) {
+            break;
+        }
     }
 
-    if (app.mode == MODE_ONLINE && app.online_match_active) {
+    if (app.online_match_active) {
         network_client_send_leave(&app.network);
     }
 

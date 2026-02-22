@@ -562,23 +562,101 @@ static void draw_piece_shape(PieceType piece, Side side, Vector2 center, float s
     }
 }
 
-/* Draws board coordinates around board edges. */
+/* Draws one framed coordinate badge centered text. */
+static void draw_coordinate_badge(Rectangle rect, const char* text, const GuiPalette* palette) {
+    int font_size = (int)(rect.height * 0.62f);
+    int text_w;
+    int text_x;
+    int text_y;
+
+    if (font_size < 16) {
+        font_size = 16;
+    }
+    if (font_size > 24) {
+        font_size = 24;
+    }
+
+    DrawRectangleRounded((Rectangle){rect.x + 1.5f, rect.y + 2.0f, rect.width, rect.height},
+                         0.32f,
+                         8,
+                         with_alpha(BLACK, 0.13f));
+    DrawRectangleRounded(rect, 0.32f, 8, with_alpha(palette->panel, 0.96f));
+    DrawRectangleRoundedLinesEx(rect, 0.32f, 8, 1.0f, with_alpha(palette->panel_border, 0.95f));
+
+    text_w = gui_measure_text(text, font_size);
+    text_x = (int)(rect.x + (rect.width - (float)text_w) * 0.5f);
+    text_y = (int)(rect.y + (rect.height - (float)font_size) * 0.5f - 1.0f);
+    gui_draw_text(text, text_x, text_y, font_size, palette->text_primary);
+}
+
+/* Draws framed board coordinates on all four board edges. */
 static void draw_coordinates(const GuiPlayLayout* layout) {
     const GuiPalette* palette = gui_palette();
-    int font_size = (layout->square_size >= 64.0f) ? 18 : 15;
+    float gap = layout->square_size * 0.09f;
+    float file_w = layout->square_size * 0.40f;
+    float file_h = layout->square_size * 0.30f;
+    float rank_w;
+    float rank_h;
+
+    if (gap < 5.0f) {
+        gap = 5.0f;
+    }
+
+    if (file_w < 26.0f) {
+        file_w = 26.0f;
+    }
+    if (file_w > 38.0f) {
+        file_w = 38.0f;
+    }
+
+    if (file_h < 22.0f) {
+        file_h = 22.0f;
+    }
+    if (file_h > 30.0f) {
+        file_h = 30.0f;
+    }
+
+    rank_w = file_h + 2.0f;
+    rank_h = file_h;
 
     for (int file = 0; file < 8; ++file) {
         char text[2] = {(char)('a' + file), '\0'};
-        int tx = (int)(layout->board.x + (float)file * layout->square_size + layout->square_size - (float)font_size * 0.8f);
-        int ty = (int)(layout->board.y + layout->board.height + 6.0f);
-        gui_draw_text(text, tx, ty, font_size, palette->text_secondary);
+        float cx = layout->board.x + ((float)file + 0.5f) * layout->square_size;
+        Rectangle top = {
+            cx - file_w * 0.5f,
+            layout->board.y - gap - file_h,
+            file_w,
+            file_h
+        };
+        Rectangle bottom = {
+            cx - file_w * 0.5f,
+            layout->board.y + layout->board.height + gap,
+            file_w,
+            file_h
+        };
+
+        draw_coordinate_badge(top, text, palette);
+        draw_coordinate_badge(bottom, text, palette);
     }
 
-    for (int rank = 0; rank < 8; ++rank) {
-        char text[2] = {(char)('1' + rank), '\0'};
-        int tx = (int)(layout->board.x - 18.0f);
-        int ty = (int)(layout->board.y + (7.0f - (float)rank) * layout->square_size + 6.0f);
-        gui_draw_text(text, tx, ty, font_size, palette->text_secondary);
+    for (int row = 0; row < 8; ++row) {
+        char text[2] = {(char)('8' - row), '\0'};
+        float cy = layout->board.y + ((float)row + 0.5f) * layout->square_size;
+        Rectangle left = {
+            layout->board.x - gap - rank_w,
+            cy - rank_h * 0.5f,
+            rank_w,
+            rank_h
+        };
+        Rectangle right = {
+            layout->board.x + layout->board.width + gap,
+            cy - rank_h * 0.5f,
+            rank_w,
+            rank_h
+        };
+
+        draw_coordinate_badge(left, text, palette);
+        draw_coordinate_badge(right, text, palette);
     }
 }
 
@@ -632,6 +710,7 @@ GuiPlayLayout gui_get_play_layout(void) {
     float sh = (float)GetScreenHeight();
     float min_dim = (sw < sh) ? sw : sh;
     float margin = min_dim * 0.022f;
+    float coord_padding = min_dim * 0.047f;
     float sidebar_width;
     float board_width_space;
     float board_height_space;
@@ -640,6 +719,13 @@ GuiPlayLayout gui_get_play_layout(void) {
 
     if (margin < 16.0f) {
         margin = 16.0f;
+    }
+
+    if (coord_padding < 26.0f) {
+        coord_padding = 26.0f;
+    }
+    if (coord_padding > 40.0f) {
+        coord_padding = 40.0f;
     }
 
     sidebar_width = sw * 0.26f;
@@ -659,6 +745,8 @@ GuiPlayLayout gui_get_play_layout(void) {
 
     board_width_space = layout.sidebar.x - margin * 2.0f;
     board_height_space = sh - margin * 2.0f;
+    board_width_space -= coord_padding * 2.0f;
+    board_height_space -= coord_padding * 2.0f;
 
     board_size = (board_width_space < board_height_space) ? board_width_space : board_height_space;
     square_int = (int)(board_size / 8.0f);
@@ -669,8 +757,8 @@ GuiPlayLayout gui_get_play_layout(void) {
 
     layout.square_size = (float)square_int;
     layout.board = (Rectangle){
-        margin + (board_width_space - board_size) * 0.5f,
-        margin + (board_height_space - board_size) * 0.5f,
+        margin + coord_padding + (board_width_space - board_size) * 0.5f,
+        margin + coord_padding + (board_height_space - board_size) * 0.5f,
         board_size,
         board_size
     };

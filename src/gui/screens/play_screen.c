@@ -220,9 +220,11 @@ static void draw_leave_confirm_dialog(ChessApp* app) {
 void gui_screen_play(struct ChessApp* app) {
     const GuiPalette* palette = gui_palette();
     GuiPlayLayout layout = gui_get_play_layout();
-    float capture_height = layout.sidebar.height * 0.26f;
-    float middle_y = layout.sidebar.y + 70.0f + capture_height + 14.0f;
-    float middle_h = layout.sidebar.y + layout.sidebar.height - capture_height - 14.0f - middle_y - 10.0f;
+    float capture_height = layout.sidebar.height * 0.29f;
+    float top_capture_bottom = layout.sidebar.y + 70.0f + capture_height;
+    float bottom_capture_top = layout.sidebar.y + layout.sidebar.height - capture_height - 14.0f;
+    float middle_y = top_capture_bottom + 14.0f;
+    float middle_h = bottom_capture_top - middle_y - 10.0f;
     Rectangle back_btn = {
         layout.sidebar.x + 12.0f,
         layout.sidebar.y + 12.0f,
