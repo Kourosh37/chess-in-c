@@ -241,9 +241,27 @@ bool gui_button(Rectangle bounds, const char* label) {
     Color base = hovered ? palette->accent_hover : palette->accent;
     Color fill = pressed ? brighten(base, -18) : base;
     Color border = brighten(base, -28);
-    int font_size = (bounds.height >= 56.0f) ? 24 : 20;
-    int text_width = gui_measure_text(label, font_size);
-    int text_h = gui_measure_text_height(font_size);
+    int font_size = (int)lroundf(bounds.height * 0.42f);
+    int text_width;
+    int text_h;
+    int text_max_w = (int)bounds.width - 22;
+
+    if (font_size < 15) {
+        font_size = 15;
+    }
+    if (font_size > 24) {
+        font_size = 24;
+    }
+    if (text_max_w < 10) {
+        text_max_w = 10;
+    }
+
+    text_width = gui_measure_text(label, font_size);
+    while (font_size > 14 && text_width > text_max_w) {
+        font_size--;
+        text_width = gui_measure_text(label, font_size);
+    }
+    text_h = gui_measure_text_height(font_size);
 
     if (hovered) {
         SetMouseCursor(MOUSE_CURSOR_POINTING_HAND);

@@ -212,6 +212,16 @@ static void draw_piece_gloss(Vector2 c, float radius, Color fill, float alpha) {
     DrawCircleV((Vector2){c.x - radius * 0.34f, c.y - radius * 0.30f}, radius * 0.34f, gloss);
 }
 
+/* Enables mipmaps and smoother minification for texture scaling quality. */
+static void configure_texture_quality(Texture2D* texture) {
+    if (texture == NULL || texture->id == 0) {
+        return;
+    }
+
+    GenTextureMipmaps(texture);
+    SetTextureFilter(*texture, TEXTURE_FILTER_TRILINEAR);
+}
+
 /* Attempts one-time loading of local piece textures for realistic rendering. */
 static void ensure_piece_textures_loaded(void) {
     if (g_piece_texture_init_attempted) {
@@ -231,12 +241,18 @@ static void ensure_piece_textures_loaded(void) {
                 g_piece_textures[side][PIECE_VARIANT_NORMAL][piece] = LoadTexture(normal_path);
                 g_piece_texture_ready[side][PIECE_VARIANT_NORMAL][piece] =
                     (g_piece_textures[side][PIECE_VARIANT_NORMAL][piece].id != 0);
+                if (g_piece_texture_ready[side][PIECE_VARIANT_NORMAL][piece]) {
+                    configure_texture_quality(&g_piece_textures[side][PIECE_VARIANT_NORMAL][piece]);
+                }
             }
 
             if (FileExists(flipped_path)) {
                 g_piece_textures[side][PIECE_VARIANT_FLIPPED][piece] = LoadTexture(flipped_path);
                 g_piece_texture_ready[side][PIECE_VARIANT_FLIPPED][piece] =
                     (g_piece_textures[side][PIECE_VARIANT_FLIPPED][piece].id != 0);
+                if (g_piece_texture_ready[side][PIECE_VARIANT_FLIPPED][piece]) {
+                    configure_texture_quality(&g_piece_textures[side][PIECE_VARIANT_FLIPPED][piece]);
+                }
             }
         }
     }
@@ -287,6 +303,20 @@ static bool draw_piece_texture(PieceType piece,
     if (dst.width > size * 0.94f) {
         dst.width = size * 0.94f;
         dst.height = dst.width / ratio;
+    }
+    dst.width = floorf(dst.width + 0.5f);
+    dst.height = floorf(dst.height + 0.5f);
+    if ((int)dst.width < 2) {
+        dst.width = 2.0f;
+    }
+    if ((int)dst.height < 2) {
+        dst.height = 2.0f;
+    }
+    if (((int)dst.width & 1) != 0) {
+        dst.width += 1.0f;
+    }
+    if (((int)dst.height & 1) != 0) {
+        dst.height += 1.0f;
     }
     dst.x = center.x;
     dst.y = center.y;
@@ -946,6 +976,8 @@ GuiPlayLayout gui_get_play_layout(void) {
     float board_width_space;
     float board_height_space;
     float board_size;
+    float board_x;
+    float board_y;
     int square_int;
 
     if (margin < 16.0f) {
@@ -966,12 +998,13 @@ GuiPlayLayout gui_get_play_layout(void) {
     if (sidebar_width > 360.0f) {
         sidebar_width = 360.0f;
     }
+    sidebar_width = floorf(sidebar_width + 0.5f);
 
     layout.sidebar = (Rectangle){
-        sw - margin - sidebar_width,
-        margin,
+        floorf(sw - margin - sidebar_width + 0.5f),
+        floorf(margin + 0.5f),
         sidebar_width,
-        sh - margin * 2.0f
+        floorf(sh - margin * 2.0f + 0.5f)
     };
 
     board_width_space = layout.sidebar.x - margin * 2.0f;
@@ -981,15 +1014,20 @@ GuiPlayLayout gui_get_play_layout(void) {
 
     board_size = (board_width_space < board_height_space) ? board_width_space : board_height_space;
     square_int = (int)(board_size / 8.0f);
+    if ((square_int & 1) != 0) {
+        square_int--;
+    }
     if (square_int < 48) {
         square_int = 48;
     }
     board_size = (float)(square_int * 8);
+    board_x = margin + coord_padding + (board_width_space - board_size) * 0.5f;
+    board_y = margin + coord_padding + (board_height_space - board_size) * 0.5f;
 
     layout.square_size = (float)square_int;
     layout.board = (Rectangle){
-        margin + coord_padding + (board_width_space - board_size) * 0.5f,
-        margin + coord_padding + (board_height_space - board_size) * 0.5f,
+        floorf(board_x + 0.5f),
+        floorf(board_y + 0.5f),
         board_size,
         board_size
     };

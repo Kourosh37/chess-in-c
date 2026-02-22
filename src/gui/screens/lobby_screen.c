@@ -593,7 +593,7 @@ void gui_screen_lobby(struct ChessApp* app) {
                                  false);
         }
 
-        if (!input_locked && gui_button(active_btn, "Open Active Games")) {
+        if (!input_locked && gui_button(active_btn, "Active Games")) {
             app->lobby_view = LOBBY_VIEW_ACTIVE;
             app->lobby_focus_match = -1;
             if (app->network_error_popup_open) {

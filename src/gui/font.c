@@ -97,11 +97,11 @@ void gui_draw_text(const char* text, int pos_x, int pos_y, int font_size, Color 
     Vector2 pos = {(float)pos_x, (float)pos_y};
     Font font = active_font();
 
-    if (g_ui_font_loaded && font_size >= 18) {
+    if (g_ui_font_loaded && font_size >= 24) {
         Color under = color;
-        under.a = (unsigned char)((int)color.a * 58 / 100);
-        DrawTextEx(font, text, (Vector2){pos.x - 0.45f, pos.y}, (float)font_size, spacing, under);
-        DrawTextEx(font, text, (Vector2){pos.x + 0.45f, pos.y}, (float)font_size, spacing, under);
+        under.a = (unsigned char)((int)color.a * 42 / 100);
+        DrawTextEx(font, text, (Vector2){pos.x - 1.0f, pos.y}, (float)font_size, spacing, under);
+        DrawTextEx(font, text, (Vector2){pos.x + 1.0f, pos.y}, (float)font_size, spacing, under);
     }
 
     DrawTextEx(font, text, pos, (float)font_size, spacing, color);
@@ -110,7 +110,7 @@ void gui_draw_text(const char* text, int pos_x, int pos_y, int font_size, Color 
 int gui_measure_text(const char* text, int font_size) {
     float spacing = text_spacing_for_size(font_size);
     Vector2 size = MeasureTextEx(active_font(), text, (float)font_size, spacing);
-    float extra = (g_ui_font_loaded && font_size >= 18) ? 1.0f : 0.0f;
+    float extra = (g_ui_font_loaded && font_size >= 24) ? 2.0f : 0.0f;
     return (int)lroundf(size.x + extra);
 }
 
