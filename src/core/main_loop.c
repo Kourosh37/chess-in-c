@@ -300,15 +300,19 @@ int run_main_loop(void) {
     gui_font_init();
     audio_init();
     audio_set_enabled(app.sound_enabled);
-    audio_set_master_volume(app.sound_volume);
-    audio_set_menu_music_active(true);
+    audio_set_sfx_volume(app.sfx_volume);
+    audio_set_menu_music_volume(app.menu_music_volume);
+    audio_set_game_music_volume(app.game_music_volume);
+    audio_set_menu_music_active(app.screen != SCREEN_PLAY);
+    audio_set_game_music_active(app.screen == SCREEN_PLAY);
 
     while (!WindowShouldClose()) {
         maybe_process_network(&app);
         maybe_process_ai_turn(&app, &worker);
         app_tick(&app, GetFrameTime());
         gui_set_active_theme(app.theme);
-        audio_set_menu_music_active(app.screen == SCREEN_MENU);
+        audio_set_menu_music_active(app.screen != SCREEN_PLAY);
+        audio_set_game_music_active(app.screen == SCREEN_PLAY);
         audio_update();
 
         BeginDrawing();

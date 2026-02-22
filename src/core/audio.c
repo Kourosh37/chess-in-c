@@ -28,14 +28,30 @@ static const char* g_menu_music_candidates[] = {
     "menu_bgm.wav"
 };
 
+static const char* g_game_music_candidates[] = {
+    "game_bgm.ogg",
+    "game_bgm.mp3",
+    "game_bgm.wav"
+};
+
 static bool g_audio_initialized = false;
 static bool g_audio_enabled = true;
-static float g_master_volume = 1.0f;
+
+static float g_sfx_volume = 1.0f;
+static float g_menu_music_volume = 0.55f;
+static float g_game_music_volume = 0.55f;
+
 static Music g_menu_music = {0};
 static bool g_menu_music_loaded = false;
 static bool g_menu_music_active = false;
 static bool g_menu_music_paused = false;
 static const char* g_menu_music_loaded_name = NULL;
+
+static Music g_game_music = {0};
+static bool g_game_music_loaded = false;
+static bool g_game_music_active = false;
+static bool g_game_music_paused = false;
+static const char* g_game_music_loaded_name = NULL;
 
 /* Clamps a value to the [0, 1] interval. */
 static float clamp01(float value) {
@@ -48,15 +64,32 @@ static float clamp01(float value) {
     return value;
 }
 
-/* Applies current master volume to background menu music. */
+/* Applies SFX volume to all loaded one-shot sounds. */
+static void apply_sfx_volume(void) {
+    for (int i = 0; i < AUDIO_SFX_COUNT; ++i) {
+        if (g_slots[i].loaded) {
+            SetSoundVolume(g_slots[i].sound, g_sfx_volume);
+        }
+    }
+}
+
+/* Applies menu music volume on current stream. */
 static void apply_menu_music_volume(void) {
     if (!g_menu_music_loaded) {
         return;
     }
-    SetMusicVolume(g_menu_music, g_master_volume * 0.45f);
+    SetMusicVolume(g_menu_music, g_menu_music_volume);
 }
 
-/* Updates menu music play/pause state based on app screen and audio settings. */
+/* Applies in-game music volume on current stream. */
+static void apply_game_music_volume(void) {
+    if (!g_game_music_loaded) {
+        return;
+    }
+    SetMusicVolume(g_game_music, g_game_music_volume);
+}
+
+/* Updates menu music play/pause state based on active screen and mute state. */
 static void refresh_menu_music_state(void) {
     if (!g_menu_music_loaded) {
         return;
@@ -83,30 +116,59 @@ static void refresh_menu_music_state(void) {
     }
 }
 
-/* Loads optional menu background music from assets/sfx. */
-static void load_menu_music(void) {
-    char path[260];
-    int candidate_count = (int)(sizeof(g_menu_music_candidates) / sizeof(g_menu_music_candidates[0]));
+/* Updates in-game music play/pause state based on active screen and mute state. */
+static void refresh_game_music_state(void) {
+    if (!g_game_music_loaded) {
+        return;
+    }
 
-    g_menu_music_loaded = false;
-    g_menu_music_active = false;
-    g_menu_music_paused = false;
-    g_menu_music_loaded_name = NULL;
-    memset(&g_menu_music, 0, sizeof(g_menu_music));
+    if (!g_audio_enabled || !g_game_music_active) {
+        if (!g_game_music_paused && IsMusicStreamPlaying(g_game_music)) {
+            PauseMusicStream(g_game_music);
+            g_game_music_paused = true;
+        }
+        return;
+    }
+
+    apply_game_music_volume();
+
+    if (g_game_music_paused) {
+        ResumeMusicStream(g_game_music);
+        g_game_music_paused = false;
+        return;
+    }
+
+    if (!IsMusicStreamPlaying(g_game_music)) {
+        PlayMusicStream(g_game_music);
+    }
+}
+
+/* Loads one optional music stream by trying candidate filenames in order. */
+static void load_music_candidates(const char* const* candidates,
+                                  int candidate_count,
+                                  Music* out_music,
+                                  bool* out_loaded,
+                                  const char** out_loaded_name) {
+    char path[260];
+
+    *out_loaded = false;
+    *out_loaded_name = NULL;
+    memset(out_music, 0, sizeof(*out_music));
 
     for (int i = 0; i < candidate_count; ++i) {
-        const char* name = g_menu_music_candidates[i];
+        const char* name = candidates[i];
+        Music music;
 
         snprintf(path, sizeof(path), "assets/sfx/%s", name);
         if (!FileExists(path)) {
             continue;
         }
 
-        g_menu_music = LoadMusicStream(path);
-        if (g_menu_music.frameCount > 0) {
-            g_menu_music_loaded = true;
-            g_menu_music_loaded_name = name;
-            apply_menu_music_volume();
+        music = LoadMusicStream(path);
+        if (music.frameCount > 0) {
+            *out_music = music;
+            *out_loaded = true;
+            *out_loaded_name = name;
             return;
         }
     }
@@ -131,9 +193,6 @@ static void load_slot(AudioSfx sfx) {
 
     slot->sound = LoadSound(path);
     slot->loaded = (slot->sound.frameCount > 0);
-    if (slot->loaded) {
-        SetSoundVolume(slot->sound, g_master_volume);
-    }
 }
 
 bool audio_init(void) {
@@ -149,7 +208,22 @@ bool audio_init(void) {
     for (int i = 0; i < AUDIO_SFX_COUNT; ++i) {
         load_slot((AudioSfx)i);
     }
-    load_menu_music();
+
+    load_music_candidates(g_menu_music_candidates,
+                          (int)(sizeof(g_menu_music_candidates) / sizeof(g_menu_music_candidates[0])),
+                          &g_menu_music,
+                          &g_menu_music_loaded,
+                          &g_menu_music_loaded_name);
+
+    load_music_candidates(g_game_music_candidates,
+                          (int)(sizeof(g_game_music_candidates) / sizeof(g_game_music_candidates[0])),
+                          &g_game_music,
+                          &g_game_music_loaded,
+                          &g_game_music_loaded_name);
+
+    apply_sfx_volume();
+    apply_menu_music_volume();
+    apply_game_music_volume();
 
     g_audio_initialized = true;
     return true;
@@ -179,6 +253,18 @@ void audio_shutdown(void) {
         memset(&g_menu_music, 0, sizeof(g_menu_music));
     }
 
+    if (g_game_music_loaded) {
+        if (IsMusicStreamPlaying(g_game_music)) {
+            StopMusicStream(g_game_music);
+        }
+        UnloadMusicStream(g_game_music);
+        g_game_music_loaded = false;
+        g_game_music_active = false;
+        g_game_music_paused = false;
+        g_game_music_loaded_name = NULL;
+        memset(&g_game_music, 0, sizeof(g_game_music));
+    }
+
     CloseAudioDevice();
     g_audio_initialized = false;
 }
@@ -186,26 +272,38 @@ void audio_shutdown(void) {
 void audio_set_enabled(bool enabled) {
     g_audio_enabled = enabled;
     refresh_menu_music_state();
+    refresh_game_music_state();
 }
 
 bool audio_is_enabled(void) {
     return g_audio_enabled;
 }
 
-void audio_set_master_volume(float volume) {
-    g_master_volume = clamp01(volume);
+void audio_set_sfx_volume(float volume) {
+    g_sfx_volume = clamp01(volume);
+    apply_sfx_volume();
+}
 
-    for (int i = 0; i < AUDIO_SFX_COUNT; ++i) {
-        if (g_slots[i].loaded) {
-            SetSoundVolume(g_slots[i].sound, g_master_volume);
-        }
-    }
+float audio_get_sfx_volume(void) {
+    return g_sfx_volume;
+}
 
+void audio_set_menu_music_volume(float volume) {
+    g_menu_music_volume = clamp01(volume);
     apply_menu_music_volume();
 }
 
-float audio_get_master_volume(void) {
-    return g_master_volume;
+float audio_get_menu_music_volume(void) {
+    return g_menu_music_volume;
+}
+
+void audio_set_game_music_volume(float volume) {
+    g_game_music_volume = clamp01(volume);
+    apply_game_music_volume();
+}
+
+float audio_get_game_music_volume(void) {
+    return g_game_music_volume;
 }
 
 bool audio_is_loaded(AudioSfx sfx) {
@@ -254,12 +352,31 @@ const char* audio_menu_music_expected_filename(void) {
     return g_menu_music_candidates[0];
 }
 
+void audio_set_game_music_active(bool active) {
+    g_game_music_active = active;
+    refresh_game_music_state();
+}
+
+bool audio_is_game_music_loaded(void) {
+    return g_game_music_loaded;
+}
+
+const char* audio_game_music_expected_filename(void) {
+    if (g_game_music_loaded_name != NULL) {
+        return g_game_music_loaded_name;
+    }
+    return g_game_music_candidates[0];
+}
+
 void audio_update(void) {
-    if (!g_audio_initialized || !g_menu_music_loaded) {
+    if (!g_audio_initialized) {
         return;
     }
 
-    if (g_audio_enabled && g_menu_music_active) {
+    if (g_audio_enabled && g_menu_music_loaded && g_menu_music_active) {
         UpdateMusicStream(g_menu_music);
+    }
+    if (g_audio_enabled && g_game_music_loaded && g_game_music_active) {
+        UpdateMusicStream(g_game_music);
     }
 }

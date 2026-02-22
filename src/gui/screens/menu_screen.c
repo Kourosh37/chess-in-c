@@ -1,8 +1,54 @@
 #include "gui.h"
 
 #include <stdio.h>
+#include <string.h>
 
 #include "game_state.h"
+
+/* Draws one clipped text line that never overflows the target width. */
+static void draw_text_fit(const char* text,
+                          int x,
+                          int y,
+                          int font_size,
+                          int max_width,
+                          Color color) {
+    char buffer[192];
+    size_t len;
+    int ellipsis_w;
+
+    if (text == NULL || max_width <= 0) {
+        return;
+    }
+
+    if (gui_measure_text(text, font_size) <= max_width) {
+        gui_draw_text(text, x, y, font_size, color);
+        return;
+    }
+
+    ellipsis_w = gui_measure_text("...", font_size);
+    if (ellipsis_w >= max_width) {
+        return;
+    }
+
+    strncpy(buffer, text, sizeof(buffer) - 1);
+    buffer[sizeof(buffer) - 1] = '\0';
+    len = strlen(buffer);
+
+    while (len > 0) {
+        buffer[len] = '\0';
+        if (gui_measure_text(buffer, font_size) + ellipsis_w <= max_width) {
+            break;
+        }
+        len--;
+    }
+
+    if (len == 0) {
+        return;
+    }
+
+    strncat(buffer, "...", sizeof(buffer) - strlen(buffer) - 1);
+    gui_draw_text(buffer, x, y, font_size, color);
+}
 
 /* Draws confirmation dialog for app exit action from main menu. */
 static void draw_exit_confirm_dialog(ChessApp* app) {
@@ -119,7 +165,12 @@ void gui_screen_menu(struct ChessApp* app) {
              app->profile.username,
              app->profile.wins,
              app->profile.losses);
-    gui_draw_text(profile_line, (int)panel.x + 42, (int)panel.y + 126, 22, palette->text_primary);
+    draw_text_fit(profile_line,
+                  (int)panel.x + 42,
+                  (int)panel.y + 126,
+                  22,
+                  (int)panel.width - 84,
+                  palette->text_primary);
 
     single_btn = (Rectangle){panel.x + 42.0f, panel.y + 184.0f, panel.width - 84.0f, 58.0f};
     local_btn = (Rectangle){panel.x + 42.0f, panel.y + 255.0f, panel.width - 84.0f, 58.0f};
@@ -194,10 +245,11 @@ void gui_screen_menu(struct ChessApp* app) {
     }
 
     if (active_games > 0) {
-        gui_draw_text(app->online_runtime_status,
+        draw_text_fit(app->online_runtime_status,
                       (int)panel.x + 42,
                       (int)panel.y + panel.height - 28,
                       18,
+                      (int)panel.width - 84,
                       palette->text_secondary);
     }
 

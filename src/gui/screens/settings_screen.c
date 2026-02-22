@@ -1,5 +1,6 @@
 #include "gui.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -52,37 +53,34 @@ static void draw_text_fit(const char* text,
     gui_draw_text(buffer, x, y, font_size, color);
 }
 
-/* Draws a standard settings row with label, value and +/- controls. */
-static void draw_stepper_row(const char* label,
-                             const char* value,
-                             Rectangle row,
-                             bool* minus_pressed,
-                             bool* plus_pressed) {
+/* Draws one slider row with label/value text and draggable bar. */
+static bool draw_slider_row(const char* label,
+                            const char* value_text,
+                            Rectangle row,
+                            float* value,
+                            float min_value,
+                            float max_value) {
     const GuiPalette* palette = gui_palette();
     float pad_x = 16.0f;
-    float pad_y = 9.0f;
-    float btn_w = 56.0f;
-    float btn_gap = 8.0f;
-    Rectangle plus_btn = {row.x + row.width - pad_x - btn_w, row.y + pad_y, btn_w, row.height - pad_y * 2.0f};
-    Rectangle minus_btn = {plus_btn.x - btn_gap - btn_w, row.y + pad_y, btn_w, row.height - pad_y * 2.0f};
-    int font_size = (row.height >= 70.0f) ? 25 : 23;
-    int value_width = gui_measure_text(value, font_size);
-    int text_y = (int)(row.y + (row.height - (float)font_size) * 0.5f - 1.0f);
-    int value_x = (int)(minus_btn.x - 14.0f - (float)value_width);
-    int min_value_x = (int)(row.x + row.width * 0.48f);
-
-    if (value_x < min_value_x) {
-        value_x = min_value_x;
-    }
+    int label_size = (row.height >= 82.0f) ? 23 : 21;
+    int value_size = label_size;
+    int label_y = (int)row.y + 10;
+    int value_w = gui_measure_text(value_text, value_size);
+    int value_x = (int)(row.x + row.width - pad_x - (float)value_w);
+    Rectangle slider = {
+        row.x + pad_x,
+        row.y + row.height - 28.0f,
+        row.width - pad_x * 2.0f,
+        20.0f
+    };
 
     DrawRectangleRounded(row, 0.10f, 8, Fade(palette->panel, 0.92f));
     DrawRectangleRoundedLinesEx(row, 0.10f, 8, 1.0f, palette->panel_border);
 
-    gui_draw_text(label, (int)row.x + (int)pad_x, text_y, font_size, palette->text_primary);
-    gui_draw_text(value, value_x, text_y, font_size, palette->accent);
+    gui_draw_text(label, (int)row.x + (int)pad_x, label_y, label_size, palette->text_primary);
+    gui_draw_text(value_text, value_x, label_y, value_size, palette->accent);
 
-    *minus_pressed = gui_button(minus_btn, "-");
-    *plus_pressed = gui_button(plus_btn, "+");
+    return gui_slider_float(slider, value, min_value, max_value);
 }
 
 void gui_screen_settings(struct ChessApp* app) {
@@ -96,8 +94,8 @@ void gui_screen_settings(struct ChessApp* app) {
     float header_h = 104.0f;
     float card_bottom_pad = 24.0f;
     float card_inner = 16.0f;
-    float row_h = 72.0f;
-    float row_gap = 14.0f;
+    float row_h = 84.0f;
+    float row_gap = 12.0f;
     float cards_h;
     float left_w;
     float right_w;
@@ -110,9 +108,9 @@ void gui_screen_settings(struct ChessApp* app) {
     Rectangle difficulty_row;
     Rectangle theme_row;
     Rectangle toggle_btn;
-    Rectangle volume_row;
-    bool minus;
-    bool plus;
+    Rectangle sfx_row;
+    Rectangle menu_music_row;
+    Rectangle game_music_row;
     bool dirty = false;
 
     if (panel_w < 900.0f) {
@@ -177,6 +175,7 @@ void gui_screen_settings(struct ChessApp* app) {
 
     {
         char value[32];
+        float ai_value = (float)app->ai_difficulty;
         int theme_count = gui_theme_count();
         float pad_x = 16.0f;
         float pad_y = 9.0f;
@@ -204,13 +203,9 @@ void gui_screen_settings(struct ChessApp* app) {
         int text_y;
 
         snprintf(value, sizeof(value), "%d%%", app->ai_difficulty);
-        draw_stepper_row("AI Difficulty", value, difficulty_row, &minus, &plus);
-        if (minus) {
-            app_set_ai_difficulty(app, app->ai_difficulty - 5);
-            dirty = true;
-        }
-        if (plus) {
-            app_set_ai_difficulty(app, app->ai_difficulty + 5);
+        if (draw_slider_row("AI Difficulty", value, difficulty_row, &ai_value, 0.0f, 100.0f)) {
+            int rounded = (int)lroundf(ai_value);
+            app_set_ai_difficulty(app, rounded);
             dirty = true;
         }
 
@@ -254,9 +249,21 @@ void gui_screen_settings(struct ChessApp* app) {
 
     right_rows_y = right_card.y + 58.0f;
     toggle_btn = (Rectangle){right_card.x + card_inner, right_rows_y, right_card.width - card_inner * 2.0f, 62.0f};
-    volume_row = (Rectangle){
+    sfx_row = (Rectangle){
         right_card.x + card_inner,
-        right_rows_y + row_h + row_gap,
+        right_rows_y + toggle_btn.height + row_gap,
+        right_card.width - card_inner * 2.0f,
+        row_h
+    };
+    menu_music_row = (Rectangle){
+        right_card.x + card_inner,
+        sfx_row.y + row_h + row_gap,
+        right_card.width - card_inner * 2.0f,
+        row_h
+    };
+    game_music_row = (Rectangle){
+        right_card.x + card_inner,
+        menu_music_row.y + row_h + row_gap,
         right_card.width - card_inner * 2.0f,
         row_h
     };
@@ -264,6 +271,11 @@ void gui_screen_settings(struct ChessApp* app) {
     {
         const char* toggle_label = app->sound_enabled ? "Sound On" : "Sound Off";
         char vol_text[32];
+        float sfx_value = app->sfx_volume;
+        float menu_music_value = app->menu_music_volume;
+        float game_music_value = app->game_music_volume;
+        float status_y = game_music_row.y + game_music_row.height + 18.0f;
+        int status_w = (int)right_card.width - 36;
 
         if (gui_button(toggle_btn, toggle_label)) {
             app->sound_enabled = !app->sound_enabled;
@@ -271,39 +283,42 @@ void gui_screen_settings(struct ChessApp* app) {
             dirty = true;
         }
 
-        snprintf(vol_text, sizeof(vol_text), "%d%%", (int)(app->sound_volume * 100.0f + 0.5f));
-        draw_stepper_row("Volume", vol_text, volume_row, &minus, &plus);
-        if (minus) {
-            app->sound_volume -= 0.05f;
-            if (app->sound_volume < 0.0f) {
-                app->sound_volume = 0.0f;
-            }
-            audio_set_master_volume(app->sound_volume);
-            dirty = true;
-        }
-        if (plus) {
-            app->sound_volume += 0.05f;
-            if (app->sound_volume > 1.0f) {
-                app->sound_volume = 1.0f;
-            }
-            audio_set_master_volume(app->sound_volume);
+        snprintf(vol_text, sizeof(vol_text), "%d%%", (int)(app->sfx_volume * 100.0f + 0.5f));
+        if (draw_slider_row("SFX Volume", vol_text, sfx_row, &sfx_value, 0.0f, 1.0f)) {
+            app->sfx_volume = sfx_value;
+            audio_set_sfx_volume(app->sfx_volume);
             dirty = true;
         }
 
-        gui_draw_text("SFX Folder", (int)right_card.x + 18, (int)(volume_row.y + volume_row.height + 26.0f), 22, palette->text_secondary);
-        gui_draw_text("assets/sfx", (int)right_card.x + 18, (int)(volume_row.y + volume_row.height + 52.0f), 26, palette->text_primary);
-        gui_draw_text("Menu BGM", (int)right_card.x + 18, (int)(volume_row.y + volume_row.height + 82.0f), 22, palette->text_secondary);
-        if (audio_is_menu_music_loaded()) {
-            gui_draw_text(audio_menu_music_expected_filename(),
+        snprintf(vol_text, sizeof(vol_text), "%d%%", (int)(app->menu_music_volume * 100.0f + 0.5f));
+        if (draw_slider_row("Menu Music", vol_text, menu_music_row, &menu_music_value, 0.0f, 1.0f)) {
+            app->menu_music_volume = menu_music_value;
+            audio_set_menu_music_volume(app->menu_music_volume);
+            dirty = true;
+        }
+
+        snprintf(vol_text, sizeof(vol_text), "%d%%", (int)(app->game_music_volume * 100.0f + 0.5f));
+        if (draw_slider_row("Game Music", vol_text, game_music_row, &game_music_value, 0.0f, 1.0f)) {
+            app->game_music_volume = game_music_value;
+            audio_set_game_music_volume(app->game_music_volume);
+            dirty = true;
+        }
+
+        if (!audio_is_menu_music_loaded()) {
+            draw_text_fit("Missing menu music: menu_bgm.ogg / .mp3 / .wav",
                           (int)right_card.x + 18,
-                          (int)(volume_row.y + volume_row.height + 108.0f),
-                          24,
-                          palette->accent);
-        } else {
-            gui_draw_text("Not found (add menu_bgm.ogg/mp3/wav)",
+                          (int)status_y,
+                          19,
+                          status_w,
+                          palette->text_secondary);
+            status_y += 23.0f;
+        }
+        if (!audio_is_game_music_loaded()) {
+            draw_text_fit("Missing game music: game_bgm.ogg / .mp3 / .wav",
                           (int)right_card.x + 18,
-                          (int)(volume_row.y + volume_row.height + 108.0f),
-                          20,
+                          (int)status_y,
+                          19,
+                          status_w,
                           palette->text_secondary);
         }
     }

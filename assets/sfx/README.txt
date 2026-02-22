@@ -14,6 +14,11 @@ menu_bgm.ogg
 menu_bgm.mp3
 menu_bgm.wav
 
+Optional in-game background music (auto-detected, first existing file is used):
+game_bgm.ogg
+game_bgm.mp3
+game_bgm.wav
+
 Notes:
 - Any file may be missing; the game will keep running silently for that event.
 - Supported formats depend on raylib build, WAV is recommended for compatibility.

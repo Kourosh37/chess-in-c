@@ -22,6 +22,17 @@ static int clamp_difficulty_percent(int value) {
     return value;
 }
 
+/* Clamps persisted audio volume values to the safe 0..1 range. */
+static float clamp_volume01(float value) {
+    if (value < 0.0f) {
+        return 0.0f;
+    }
+    if (value > 1.0f) {
+        return 1.0f;
+    }
+    return value;
+}
+
 /* Maps one user-facing AI difficulty percent into internal search limits. */
 void app_set_ai_difficulty(ChessApp* app, int difficulty_percent) {
     int difficulty;
@@ -111,7 +122,11 @@ static void load_settings(ChessApp* app) {
     char line[128];
     int legacy_depth = -1;
     int legacy_randomness = -1;
+    float legacy_sound_volume = -1.0f;
     bool has_ai_difficulty = false;
+    bool has_sfx_volume = false;
+    bool has_menu_music_volume = false;
+    bool has_game_music_volume = false;
 
     if (file == NULL) {
         return;
@@ -152,15 +167,17 @@ static void load_settings(ChessApp* app) {
         } else if (strncmp(line, "sound_enabled=", 14) == 0) {
             int enabled = atoi(line + 14);
             app->sound_enabled = (enabled != 0);
+        } else if (strncmp(line, "sfx_volume=", 11) == 0) {
+            app->sfx_volume = clamp_volume01((float)atof(line + 11));
+            has_sfx_volume = true;
+        } else if (strncmp(line, "menu_music_volume=", 18) == 0) {
+            app->menu_music_volume = clamp_volume01((float)atof(line + 18));
+            has_menu_music_volume = true;
+        } else if (strncmp(line, "game_music_volume=", 18) == 0) {
+            app->game_music_volume = clamp_volume01((float)atof(line + 18));
+            has_game_music_volume = true;
         } else if (strncmp(line, "sound_volume=", 13) == 0) {
-            float volume = (float)atof(line + 13);
-            if (volume < 0.0f) {
-                volume = 0.0f;
-            }
-            if (volume > 1.0f) {
-                volume = 1.0f;
-            }
-            app->sound_volume = volume;
+            legacy_sound_volume = clamp_volume01((float)atof(line + 13));
         }
     }
 
@@ -190,6 +207,18 @@ static void load_settings(ChessApp* app) {
         consistency_percent = 100 - clamped_randomness;
         blended = (depth_percent * 65 + consistency_percent * 35 + 50) / 100;
         app_set_ai_difficulty(app, blended);
+    }
+
+    if (legacy_sound_volume >= 0.0f) {
+        if (!has_sfx_volume) {
+            app->sfx_volume = legacy_sound_volume;
+        }
+        if (!has_menu_music_volume) {
+            app->menu_music_volume = legacy_sound_volume;
+        }
+        if (!has_game_music_volume) {
+            app->game_music_volume = legacy_sound_volume;
+        }
     }
 }
 
@@ -223,7 +252,9 @@ void app_init(ChessApp* app) {
     app->ai_difficulty = 60;
     app_set_ai_difficulty(app, app->ai_difficulty);
     app->sound_enabled = true;
-    app->sound_volume = 1.0f;
+    app->sfx_volume = 1.0f;
+    app->menu_music_volume = 0.55f;
+    app->game_music_volume = 0.55f;
 
     load_settings(app);
 
@@ -446,7 +477,9 @@ bool app_save_settings(const ChessApp* app) {
     fprintf(file, "theme=%d\n", (int)app->theme);
     fprintf(file, "ai_difficulty=%d\n", app->ai_difficulty);
     fprintf(file, "sound_enabled=%d\n", app->sound_enabled ? 1 : 0);
-    fprintf(file, "sound_volume=%.3f\n", app->sound_volume);
+    fprintf(file, "sfx_volume=%.3f\n", app->sfx_volume);
+    fprintf(file, "menu_music_volume=%.3f\n", app->menu_music_volume);
+    fprintf(file, "game_music_volume=%.3f\n", app->game_music_volume);
 
     fclose(file);
     return true;

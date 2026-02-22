@@ -48,7 +48,9 @@ typedef struct ChessApp {
     char online_runtime_status[128];
 
     bool sound_enabled;
-    float sound_volume;
+    float sfx_volume;
+    float menu_music_volume;
+    float game_music_volume;
 
     int last_move_from;
     int last_move_to;

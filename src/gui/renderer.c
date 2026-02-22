@@ -1211,7 +1211,7 @@ void gui_draw_board(const ChessApp* app) {
     draw_coordinates(&layout);
 
     {
-        float capture_height = layout.sidebar.height * 0.29f;
+        float capture_height = layout.sidebar.height * 0.26f;
         Rectangle top = {
             layout.sidebar.x + 12.0f,
             layout.sidebar.y + 70.0f,
@@ -1224,6 +1224,19 @@ void gui_draw_board(const ChessApp* app) {
             layout.sidebar.width - 24.0f,
             capture_height
         };
+
+        if (capture_height < 138.0f) {
+            capture_height = 138.0f;
+            top.height = capture_height;
+            bottom.y = layout.sidebar.y + layout.sidebar.height - capture_height - 14.0f;
+            bottom.height = capture_height;
+        }
+        if (capture_height > 210.0f) {
+            capture_height = 210.0f;
+            top.height = capture_height;
+            bottom.y = layout.sidebar.y + layout.sidebar.height - capture_height - 14.0f;
+            bottom.height = capture_height;
+        }
 
         draw_captured_group(&app->position, top, SIDE_WHITE);
         draw_captured_group(&app->position, bottom, SIDE_BLACK);

@@ -25,8 +25,12 @@ void audio_shutdown(void);
 void audio_set_enabled(bool enabled);
 bool audio_is_enabled(void);
 
-void audio_set_master_volume(float volume);
-float audio_get_master_volume(void);
+void audio_set_sfx_volume(float volume);
+float audio_get_sfx_volume(void);
+void audio_set_menu_music_volume(float volume);
+float audio_get_menu_music_volume(void);
+void audio_set_game_music_volume(float volume);
+float audio_get_game_music_volume(void);
 
 bool audio_is_loaded(AudioSfx sfx);
 const char* audio_expected_filename(AudioSfx sfx);
@@ -35,6 +39,9 @@ void audio_play(AudioSfx sfx);
 void audio_set_menu_music_active(bool active);
 bool audio_is_menu_music_loaded(void);
 const char* audio_menu_music_expected_filename(void);
+void audio_set_game_music_active(bool active);
+bool audio_is_game_music_loaded(void);
+const char* audio_game_music_expected_filename(void);
 void audio_update(void);
 
 #ifdef __cplusplus

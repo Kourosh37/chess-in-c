@@ -1,6 +1,7 @@
 #include "gui.h"
 
 #include <ctype.h>
+#include <math.h>
 #include <string.h>
 
 #include "audio.h"
@@ -23,6 +24,7 @@ typedef struct InputContextMenu {
 
 static InputContextMenu g_input_menu = {0};
 static char* g_selected_input_buffer = NULL;
+static float* g_active_slider_value = NULL;
 
 /* True when user currently has select-all state on this input buffer. */
 static bool input_has_selection(char* buffer) {
@@ -260,6 +262,137 @@ bool gui_button(Rectangle bounds, const char* label) {
     }
 
     return clicked;
+}
+
+bool gui_slider_float(Rectangle bounds, float* value, float min_value, float max_value) {
+    const GuiPalette* palette = gui_palette();
+    Vector2 mouse = GetMousePosition();
+    bool hovered = CheckCollisionPointRec(mouse, bounds);
+    bool changed = false;
+    float range;
+    float t;
+    float knob_x;
+    float track_y;
+    float track_h = 6.0f;
+    float knob_r;
+    Rectangle track;
+
+    if (value == NULL) {
+        return false;
+    }
+
+    if (max_value < min_value) {
+        float temp = min_value;
+        min_value = max_value;
+        max_value = temp;
+    }
+
+    range = max_value - min_value;
+    if (range <= 0.0001f) {
+        *value = min_value;
+    } else {
+        if (*value < min_value) {
+            *value = min_value;
+        }
+        if (*value > max_value) {
+            *value = max_value;
+        }
+    }
+
+    t = (range <= 0.0001f) ? 0.0f : ((*value - min_value) / range);
+    if (t < 0.0f) {
+        t = 0.0f;
+    }
+    if (t > 1.0f) {
+        t = 1.0f;
+    }
+
+    track_y = bounds.y + bounds.height * 0.5f - track_h * 0.5f;
+    track = (Rectangle){bounds.x + 8.0f, track_y, bounds.width - 16.0f, track_h};
+    if (track.width < 24.0f) {
+        track.x = bounds.x;
+        track.width = bounds.width;
+    }
+
+    knob_r = bounds.height * 0.30f;
+    if (knob_r < 7.0f) {
+        knob_r = 7.0f;
+    }
+    if (knob_r > 11.0f) {
+        knob_r = 11.0f;
+    }
+    knob_x = track.x + track.width * t;
+
+    if (hovered && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+        g_active_slider_value = value;
+    }
+
+    if (g_active_slider_value == value) {
+        if (!IsMouseButtonDown(MOUSE_LEFT_BUTTON)) {
+            g_active_slider_value = NULL;
+        } else {
+            float nt = (track.width > 1.0f) ? ((mouse.x - track.x) / track.width) : 0.0f;
+            float next;
+
+            if (nt < 0.0f) {
+                nt = 0.0f;
+            }
+            if (nt > 1.0f) {
+                nt = 1.0f;
+            }
+
+            next = min_value + nt * range;
+            if (fabsf(next - *value) > 0.0001f) {
+                *value = next;
+                changed = true;
+            }
+            knob_x = track.x + track.width * nt;
+        }
+    } else if (hovered) {
+        float wheel = GetMouseWheelMove();
+        if (wheel != 0.0f && range > 0.0001f) {
+            float step = range * 0.02f;
+            float next;
+
+            if (step < 0.01f) {
+                step = 0.01f;
+            }
+
+            next = *value + wheel * step;
+            if (next < min_value) {
+                next = min_value;
+            }
+            if (next > max_value) {
+                next = max_value;
+            }
+
+            if (fabsf(next - *value) > 0.0001f) {
+                *value = next;
+                changed = true;
+                t = (range <= 0.0001f) ? 0.0f : ((*value - min_value) / range);
+                knob_x = track.x + track.width * t;
+            }
+        }
+    }
+
+    if (hovered || g_active_slider_value == value) {
+        SetMouseCursor(MOUSE_CURSOR_POINTING_HAND);
+    }
+
+    DrawRectangleRounded(track, 1.0f, 10, Fade(palette->panel_border, 0.60f));
+    DrawRectangleRounded((Rectangle){track.x, track.y, knob_x - track.x, track.height},
+                         1.0f,
+                         10,
+                         Fade(palette->accent, 0.95f));
+
+    DrawCircleV((Vector2){knob_x, bounds.y + bounds.height * 0.5f}, knob_r + 2.0f, Fade(BLACK, 0.16f));
+    DrawCircleV((Vector2){knob_x, bounds.y + bounds.height * 0.5f}, knob_r, palette->accent_hover);
+    DrawCircleLines((int)knob_x,
+                    (int)(bounds.y + bounds.height * 0.5f),
+                    knob_r,
+                    brighten(palette->accent, -26));
+
+    return changed;
 }
 
 void gui_input_box(Rectangle bounds, char* buffer, int capacity, bool active) {

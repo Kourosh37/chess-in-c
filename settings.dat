@@ -1,4 +1,6 @@
-theme=1
+theme=2
 ai_difficulty=100
 sound_enabled=1
-sound_volume=1.000
+sfx_volume=1.000
+menu_music_volume=1.000
+game_music_volume=1.000

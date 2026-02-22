@@ -5,6 +5,51 @@
 
 #include "game_state.h"
 
+/* Draws one clipped text line to keep status text inside card bounds. */
+static void draw_text_fit(const char* text,
+                          int x,
+                          int y,
+                          int font_size,
+                          int max_width,
+                          Color color) {
+    char buffer[192];
+    size_t len;
+    int ellipsis_w;
+
+    if (text == NULL || max_width <= 0) {
+        return;
+    }
+
+    if (gui_measure_text(text, font_size) <= max_width) {
+        gui_draw_text(text, x, y, font_size, color);
+        return;
+    }
+
+    ellipsis_w = gui_measure_text("...", font_size);
+    if (ellipsis_w >= max_width) {
+        return;
+    }
+
+    strncpy(buffer, text, sizeof(buffer) - 1);
+    buffer[sizeof(buffer) - 1] = '\0';
+    len = strlen(buffer);
+
+    while (len > 0) {
+        buffer[len] = '\0';
+        if (gui_measure_text(buffer, font_size) + ellipsis_w <= max_width) {
+            break;
+        }
+        len--;
+    }
+
+    if (len == 0) {
+        return;
+    }
+
+    strncat(buffer, "...", sizeof(buffer) - strlen(buffer) - 1);
+    gui_draw_text(buffer, x, y, font_size, color);
+}
+
 /* Draws a rounded status/info block used in join/host subviews. */
 static void draw_status_box(Rectangle rect, const char* title, const char* text) {
     const GuiPalette* palette = gui_palette();
@@ -12,7 +57,12 @@ static void draw_status_box(Rectangle rect, const char* title, const char* text)
     DrawRectangleRounded(rect, 0.10f, 8, Fade(palette->panel, 0.95f));
     DrawRectangleRoundedLinesEx(rect, 0.10f, 8, 1.0f, palette->panel_border);
     gui_draw_text(title, (int)rect.x + 14, (int)rect.y + 10, 24, palette->text_primary);
-    gui_draw_text(text, (int)rect.x + 14, (int)rect.y + 44, 21, palette->text_secondary);
+    draw_text_fit(text,
+                  (int)rect.x + 14,
+                  (int)rect.y + 44,
+                  21,
+                  (int)rect.width - 28,
+                  palette->text_secondary);
 }
 
 /* Closes temporary host/join room state and returns to lobby main choices. */

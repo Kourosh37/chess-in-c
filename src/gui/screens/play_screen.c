@@ -416,7 +416,7 @@ static void draw_leave_confirm_dialog(ChessApp* app) {
 void gui_screen_play(struct ChessApp* app) {
     const GuiPalette* palette = gui_palette();
     GuiPlayLayout layout = gui_get_play_layout();
-    float capture_height = layout.sidebar.height * 0.29f;
+    float capture_height = layout.sidebar.height * 0.26f;
     float top_capture_bottom = layout.sidebar.y + 70.0f + capture_height;
     float bottom_capture_top = layout.sidebar.y + layout.sidebar.height - capture_height - 14.0f;
     float middle_y = top_capture_bottom + 14.0f;
@@ -434,6 +434,22 @@ void gui_screen_play(struct ChessApp* app) {
         middle_h
     };
 
+    if (capture_height < 138.0f) {
+        capture_height = 138.0f;
+    }
+    if (capture_height > 210.0f) {
+        capture_height = 210.0f;
+    }
+    top_capture_bottom = layout.sidebar.y + 70.0f + capture_height;
+    bottom_capture_top = layout.sidebar.y + layout.sidebar.height - capture_height - 14.0f;
+    middle_y = top_capture_bottom + 14.0f;
+    middle_h = bottom_capture_top - middle_y - 10.0f;
+    if (middle_h < 124.0f) {
+        middle_h = 124.0f;
+    }
+    middle.y = middle_y;
+    middle.height = middle_h;
+
     gui_draw_board(app);
 
     if (gui_button(back_btn, "Menu")) {
@@ -447,16 +463,43 @@ void gui_screen_play(struct ChessApp* app) {
         int y = (int)middle.y + 14;
         int content_x = (int)middle.x + 12;
         int content_w = (int)middle.width - 24;
-        int title_size = (middle.height < 210.0f) ? 22 : 24;
-        int line_size = (middle.height < 210.0f) ? 19 : 21;
-        int sub_size = (middle.height < 210.0f) ? 18 : 20;
-        int status_size = (middle.height < 210.0f) ? 20 : 22;
-        int tiny_size = (middle.height < 210.0f) ? 16 : 18;
+        int title_size = 24;
+        int line_size = 21;
+        int sub_size = 20;
+        int status_size = 22;
+        int tiny_size = 18;
         bool is_check = engine_in_check(&app->position, app->position.side_to_move);
         bool is_mate = app->game_over && is_check;
-        int info_limit_y = (int)(middle.y + middle.height * (is_mate ? 0.70f : 0.58f));
+        int info_limit_y;
         int info_end_y;
         char line[128];
+
+        if (middle.height < 280.0f) {
+            title_size = 22;
+            line_size = 19;
+            sub_size = 18;
+            status_size = 20;
+            tiny_size = 17;
+        }
+        if (middle.height < 220.0f) {
+            title_size = 20;
+            line_size = 17;
+            sub_size = 16;
+            status_size = 18;
+            tiny_size = 15;
+        }
+        if (middle.height < 180.0f) {
+            title_size = 18;
+            line_size = 16;
+            sub_size = 15;
+            status_size = 16;
+            tiny_size = 14;
+        }
+
+        info_limit_y = (int)(middle.y + middle.height * (is_mate ? 0.76f : 0.68f));
+        if (info_limit_y > (int)(middle.y + middle.height - 86.0f)) {
+            info_limit_y = (int)(middle.y + middle.height - 86.0f);
+        }
 
         snprintf(line, sizeof(line), "Turn: %s", side_to_text(app->position.side_to_move));
         draw_text_fit(line, content_x, y, title_size, content_w, palette->text_primary);
@@ -482,13 +525,24 @@ void gui_screen_play(struct ChessApp* app) {
         }
 
         if (is_check && !app->game_over) {
-            draw_text_fit("Check! King is under attack.",
-                          content_x,
-                          y,
-                          status_size + 2,
-                          content_w,
-                          (Color){198, 39, 45, 255});
-            y += status_size + 12;
+            const char* check_text = (content_w < 290 || status_size <= 17)
+                                         ? "Check!"
+                                         : "Check! King is under attack.";
+            int check_size = status_size + ((status_size >= 18) ? 1 : 0);
+
+            if (y + check_size + 6 > info_limit_y) {
+                check_size = tiny_size;
+            }
+
+            if (y + check_size + 6 <= (int)(middle.y + middle.height - 28.0f)) {
+                draw_text_fit(check_text,
+                              content_x,
+                              y,
+                              check_size,
+                              content_w,
+                              (Color){198, 39, 45, 255});
+                y += check_size + 8;
+            }
         }
 
         if (app->mode == MODE_SINGLE && app->ai_thinking) {
@@ -546,31 +600,40 @@ void gui_screen_play(struct ChessApp* app) {
         info_end_y = y;
 
         {
-            float min_log_h = middle.height * 0.36f;
+            float min_log_h = middle.height * 0.30f;
             float log_y = (float)info_end_y + 8.0f;
-            float max_log_y;
+            float log_bottom = middle.y + middle.height - 8.0f;
             Rectangle log_panel;
 
-            if (min_log_h < 96.0f) {
-                min_log_h = 96.0f;
+            if (min_log_h < 82.0f) {
+                min_log_h = 82.0f;
+            }
+            if (min_log_h > 170.0f) {
+                min_log_h = 170.0f;
             }
 
-            max_log_y = middle.y + middle.height - min_log_h - 8.0f;
-            if (log_y > max_log_y) {
-                log_y = max_log_y;
+            if (log_y + min_log_h > log_bottom) {
+                log_y = log_bottom - min_log_h;
             }
 
-            if (log_y < middle.y + middle.height * 0.40f) {
-                log_y = middle.y + middle.height * 0.40f;
+            if (log_y < (float)info_end_y + 6.0f) {
+                log_y = (float)info_end_y + 6.0f;
+            }
+
+            if (log_y < middle.y + 8.0f) {
+                log_y = middle.y + 8.0f;
             }
 
             log_panel = (Rectangle){
                 middle.x + 10.0f,
                 log_y,
                 middle.width - 20.0f,
-                middle.y + middle.height - log_y - 8.0f
+                log_bottom - log_y
             };
-            draw_move_log_panel(app, log_panel);
+
+            if (log_panel.height >= 52.0f) {
+                draw_move_log_panel(app, log_panel);
+            }
         }
     }
 
