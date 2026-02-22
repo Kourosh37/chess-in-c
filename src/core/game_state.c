@@ -5,12 +5,26 @@
 #include <string.h>
 #include <time.h>
 
-#include "audio.h"
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <sys/stat.h>
+#include <sys/types.h>
+#endif
 
-/* Default local profile persistence file. */
-static const char* PROFILE_PATH = "profile.dat";
-static const char* SETTINGS_PATH = "settings.dat";
-static const char* ONLINE_SESSIONS_PATH = "online_matches.dat";
+#include "audio.h"
+#include "secure_io.h"
+
+/* Default legacy filenames used before secure storage migration. */
+static const char* LEGACY_PROFILE_PATH = "profile.dat";
+static const char* LEGACY_SETTINGS_PATH = "settings.dat";
+static const char* LEGACY_ONLINE_SESSIONS_PATH = "online_matches.dat";
+
+#define STORAGE_PATH_MAX 512
+static char g_profile_path[STORAGE_PATH_MAX] = "profile.dat";
+static char g_settings_path[STORAGE_PATH_MAX] = "settings.dat";
+static char g_online_sessions_path[STORAGE_PATH_MAX] = "online_matches.dat";
+static bool g_storage_paths_ready = false;
 
 #define ONLINE_SESSIONS_MAGIC 0x43484F4EU /* CHON */
 #define ONLINE_SESSIONS_VERSION 1U
@@ -43,6 +57,163 @@ typedef struct PersistedOnlineMatch {
     int32_t move_log_scroll;
     char move_log[MOVE_LOG_MAX][64];
 } PersistedOnlineMatch;
+
+/* Returns true when a file path currently exists. */
+static bool file_exists(const char* path) {
+    FILE* file;
+
+    if (path == NULL || path[0] == '\0') {
+        return false;
+    }
+
+    file = fopen(path, "rb");
+    if (file == NULL) {
+        return false;
+    }
+
+    fclose(file);
+    return true;
+}
+
+/* Creates one directory if missing (best-effort). */
+static void create_dir_if_missing(const char* path) {
+    if (path == NULL || path[0] == '\0') {
+        return;
+    }
+
+#ifdef _WIN32
+    CreateDirectoryA(path, NULL);
+#else
+    mkdir(path, 0700);
+#endif
+}
+
+/* Reads one raw file payload without applying encryption/decryption. */
+static bool read_raw_file(const char* path, void** out_data, size_t* out_size) {
+    FILE* file;
+    long length;
+    uint8_t* data = NULL;
+
+    if (path == NULL || out_data == NULL || out_size == NULL) {
+        return false;
+    }
+
+    *out_data = NULL;
+    *out_size = 0;
+
+    file = fopen(path, "rb");
+    if (file == NULL) {
+        return false;
+    }
+
+    if (fseek(file, 0, SEEK_END) != 0) {
+        fclose(file);
+        return false;
+    }
+
+    length = ftell(file);
+    if (length < 0) {
+        fclose(file);
+        return false;
+    }
+
+    if (fseek(file, 0, SEEK_SET) != 0) {
+        fclose(file);
+        return false;
+    }
+
+    if (length > 0) {
+        data = (uint8_t*)malloc((size_t)length);
+        if (data == NULL) {
+            fclose(file);
+            return false;
+        }
+
+        if (fread(data, 1, (size_t)length, file) != (size_t)length) {
+            free(data);
+            fclose(file);
+            return false;
+        }
+    }
+
+    fclose(file);
+    *out_data = data;
+    *out_size = (size_t)length;
+    return true;
+}
+
+/* Migrates legacy plaintext file into encrypted secure-storage location. */
+static void migrate_legacy_file(const char* legacy_path, const char* secure_path) {
+    void* raw = NULL;
+    size_t raw_size = 0;
+
+    if (legacy_path == NULL || secure_path == NULL) {
+        return;
+    }
+
+    if (strcmp(legacy_path, secure_path) == 0) {
+        return;
+    }
+
+    if (file_exists(secure_path) || !file_exists(legacy_path)) {
+        return;
+    }
+
+    if (!read_raw_file(legacy_path, &raw, &raw_size)) {
+        return;
+    }
+
+    secure_io_write_file(secure_path, raw, raw_size);
+    free(raw);
+}
+
+/* Resolves user data paths to one OS data directory and migrates legacy files. */
+static void init_storage_paths(void) {
+    if (g_storage_paths_ready) {
+        return;
+    }
+
+    strncpy(g_profile_path, LEGACY_PROFILE_PATH, sizeof(g_profile_path) - 1);
+    g_profile_path[sizeof(g_profile_path) - 1] = '\0';
+    strncpy(g_settings_path, LEGACY_SETTINGS_PATH, sizeof(g_settings_path) - 1);
+    g_settings_path[sizeof(g_settings_path) - 1] = '\0';
+    strncpy(g_online_sessions_path, LEGACY_ONLINE_SESSIONS_PATH, sizeof(g_online_sessions_path) - 1);
+    g_online_sessions_path[sizeof(g_online_sessions_path) - 1] = '\0';
+
+#ifdef _WIN32
+    {
+        char local_appdata[STORAGE_PATH_MAX];
+        DWORD len = GetEnvironmentVariableA("LOCALAPPDATA", local_appdata, (DWORD)sizeof(local_appdata));
+
+        if (len > 0U && len < (DWORD)sizeof(local_appdata)) {
+            char app_root[STORAGE_PATH_MAX];
+            char secure_dir[STORAGE_PATH_MAX];
+
+            snprintf(app_root, sizeof(app_root), "%s\\Chess", local_appdata);
+            snprintf(secure_dir, sizeof(secure_dir), "%s\\SecureData", app_root);
+
+            create_dir_if_missing(app_root);
+            create_dir_if_missing(secure_dir);
+            {
+                DWORD attrs = GetFileAttributesA(secure_dir);
+                if (attrs != INVALID_FILE_ATTRIBUTES) {
+                    SetFileAttributesA(secure_dir, attrs | FILE_ATTRIBUTE_HIDDEN);
+                }
+            }
+
+            snprintf(g_profile_path, sizeof(g_profile_path), "%s\\profile.dat", secure_dir);
+            snprintf(g_settings_path, sizeof(g_settings_path), "%s\\settings.dat", secure_dir);
+            snprintf(g_online_sessions_path, sizeof(g_online_sessions_path), "%s\\online_matches.dat", secure_dir);
+        }
+    }
+#endif
+
+    g_storage_paths_ready = true;
+
+    migrate_legacy_file(LEGACY_PROFILE_PATH, g_profile_path);
+    migrate_legacy_file(LEGACY_SETTINGS_PATH, g_settings_path);
+    migrate_legacy_file(LEGACY_ONLINE_SESSIONS_PATH, g_online_sessions_path);
+}
 
 /* Clamps AI difficulty percentage into safe 0..100 range. */
 static int clamp_difficulty_percent(int value) {
@@ -335,8 +506,10 @@ void app_set_ai_difficulty(ChessApp* app, int difficulty_percent) {
 
 /* Parses persisted settings key/value pairs into app state. */
 static void load_settings(ChessApp* app) {
-    FILE* file = fopen(SETTINGS_PATH, "r");
-    char line[192];
+    void* raw_data = NULL;
+    size_t raw_size = 0;
+    char* text = NULL;
+    char* line;
     int legacy_depth = -1;
     int legacy_randomness = -1;
     float legacy_sound_volume = -1.0f;
@@ -345,11 +518,28 @@ static void load_settings(ChessApp* app) {
     bool has_menu_music_volume = false;
     bool has_game_music_volume = false;
 
-    if (file == NULL) {
+    init_storage_paths();
+
+    if (!secure_io_read_file(g_settings_path, &raw_data, &raw_size)) {
+        if (!read_raw_file(LEGACY_SETTINGS_PATH, &raw_data, &raw_size)) {
+            return;
+        }
+    }
+
+    text = (char*)malloc(raw_size + 1U);
+    if (text == NULL) {
+        secure_io_free(raw_data);
         return;
     }
 
-    while (fgets(line, sizeof(line), file) != NULL) {
+    if (raw_size > 0U && raw_data != NULL) {
+        memcpy(text, raw_data, raw_size);
+    }
+    text[raw_size] = '\0';
+    secure_io_free(raw_data);
+
+    line = strtok(text, "\r\n");
+    while (line != NULL) {
         if (strncmp(line, "theme=", 6) == 0) {
             int value = atoi(line + 6);
             if (value < THEME_CLASSIC) {
@@ -396,14 +586,14 @@ static void load_settings(ChessApp* app) {
         } else if (strncmp(line, "sound_volume=", 13) == 0) {
             legacy_sound_volume = clamp_volume01((float)atof(line + 13));
         } else if (strncmp(line, "online_name=", 12) == 0) {
-            char* value = line + 12;
-            value[strcspn(value, "\r\n")] = '\0';
+            const char* value = line + 12;
             strncpy(app->online_name, value, PLAYER_NAME_MAX);
             app->online_name[PLAYER_NAME_MAX] = '\0';
         }
+        line = strtok(NULL, "\r\n");
     }
 
-    fclose(file);
+    free(text);
 
     if (!has_ai_difficulty && (legacy_depth >= 0 || legacy_randomness >= 0)) {
         int depth_percent;
@@ -446,9 +636,11 @@ static void load_settings(ChessApp* app) {
 
 /* Persists online session slots for resume-after-restart UX. */
 static bool save_online_sessions_internal(const ChessApp* app) {
-    FILE* file;
     PersistedOnlineHeader header;
     PersistedOnlineMatch records[ONLINE_MATCH_MAX];
+    uint8_t* blob;
+    size_t blob_size;
+    bool ok;
 
     if (app == NULL) {
         return false;
@@ -503,50 +695,59 @@ static bool save_online_sessions_internal(const ChessApp* app) {
         }
     }
 
-    file = fopen(ONLINE_SESSIONS_PATH, "wb");
-    if (file == NULL) {
-        return false;
-    }
-
     header.magic = ONLINE_SESSIONS_MAGIC;
     header.version = ONLINE_SESSIONS_VERSION;
     header.count = ONLINE_MATCH_MAX;
 
-    if (fwrite(&header, sizeof(header), 1, file) != 1 ||
-        fwrite(records, sizeof(records), 1, file) != 1) {
-        fclose(file);
+    init_storage_paths();
+
+    blob_size = sizeof(header) + sizeof(records);
+    blob = (uint8_t*)malloc(blob_size);
+    if (blob == NULL) {
         return false;
     }
 
-    fclose(file);
-    return true;
+    memcpy(blob, &header, sizeof(header));
+    memcpy(blob + sizeof(header), records, sizeof(records));
+
+    ok = secure_io_write_file(g_online_sessions_path, blob, blob_size);
+    free(blob);
+    return ok;
 }
 
 /* Loads persisted online sessions and marks them disconnected for reconnect. */
 static void load_online_sessions_internal(ChessApp* app) {
-    FILE* file;
     PersistedOnlineHeader header;
     PersistedOnlineMatch records[ONLINE_MATCH_MAX];
+    void* blob = NULL;
+    size_t blob_size = 0;
+    const uint8_t* bytes;
 
     if (app == NULL) {
         return;
     }
 
-    file = fopen(ONLINE_SESSIONS_PATH, "rb");
-    if (file == NULL) {
+    init_storage_paths();
+
+    if (!secure_io_read_file(g_online_sessions_path, &blob, &blob_size)) {
         return;
     }
 
-    if (fread(&header, sizeof(header), 1, file) != 1 ||
-        header.magic != ONLINE_SESSIONS_MAGIC ||
+    if (blob_size < sizeof(header) + sizeof(records)) {
+        secure_io_free(blob);
+        return;
+    }
+
+    bytes = (const uint8_t*)blob;
+    memcpy(&header, bytes, sizeof(header));
+    memcpy(records, bytes + sizeof(header), sizeof(records));
+    secure_io_free(blob);
+
+    if (header.magic != ONLINE_SESSIONS_MAGIC ||
         header.version != ONLINE_SESSIONS_VERSION ||
-        header.count != ONLINE_MATCH_MAX ||
-        fread(records, sizeof(records), 1, file) != 1) {
-        fclose(file);
+        header.count != ONLINE_MATCH_MAX) {
         return;
     }
-
-    fclose(file);
 
     for (int i = 0; i < ONLINE_MATCH_MAX; ++i) {
         OnlineMatch* match = &app->online_matches[i];
@@ -694,6 +895,12 @@ void app_clear_network_error(ChessApp* app) {
     app->network_error_popup_open = false;
     app->network_error_popup_title[0] = '\0';
     app->network_error_popup_text[0] = '\0';
+}
+
+/* Exposes resolved encrypted profile storage path for shutdown save flow. */
+const char* app_profile_storage_path(void) {
+    init_storage_paths();
+    return g_profile_path;
 }
 
 /* Saves current on-screen online match board/log into persistent slot. */
@@ -1154,11 +1361,12 @@ void app_init(ChessApp* app) {
     app->online_name[0] = '\0';
     app->online_name_input[0] = '\0';
 
+    init_storage_paths();
     load_settings(app);
 
     set_default_profile(&app->profile);
-    if (!profile_load(&app->profile, PROFILE_PATH)) {
-        profile_save(&app->profile, PROFILE_PATH);
+    if (!profile_load(&app->profile, g_profile_path)) {
+        profile_save(&app->profile, g_profile_path);
     }
 
     position_set_start(&app->position);
@@ -1313,7 +1521,7 @@ bool app_apply_move(ChessApp* app, Move move) {
             profile_record_result(&app->profile, winner == app->human_side);
         }
 
-        profile_save(&app->profile, PROFILE_PATH);
+        profile_save(&app->profile, g_profile_path);
     }
 
     if (app->mode == MODE_ONLINE) {
@@ -1367,25 +1575,34 @@ void app_online_end_match(ChessApp* app, bool notify_peer) {
 
 /* Persists selected UI/audio/gameplay settings to local settings file. */
 bool app_save_settings(const ChessApp* app) {
-    FILE* file;
+    char payload[1024];
+    int written;
 
     if (app == NULL) {
         return false;
     }
 
-    file = fopen(SETTINGS_PATH, "w");
-    if (file == NULL) {
+    init_storage_paths();
+
+    written = snprintf(payload,
+                       sizeof(payload),
+                       "theme=%d\n"
+                       "ai_difficulty=%d\n"
+                       "sound_enabled=%d\n"
+                       "sfx_volume=%.3f\n"
+                       "menu_music_volume=%.3f\n"
+                       "game_music_volume=%.3f\n"
+                       "online_name=%s\n",
+                       (int)app->theme,
+                       app->ai_difficulty,
+                       app->sound_enabled ? 1 : 0,
+                       app->sfx_volume,
+                       app->menu_music_volume,
+                       app->game_music_volume,
+                       app->online_name);
+    if (written < 0 || (size_t)written >= sizeof(payload)) {
         return false;
     }
 
-    fprintf(file, "theme=%d\n", (int)app->theme);
-    fprintf(file, "ai_difficulty=%d\n", app->ai_difficulty);
-    fprintf(file, "sound_enabled=%d\n", app->sound_enabled ? 1 : 0);
-    fprintf(file, "sfx_volume=%.3f\n", app->sfx_volume);
-    fprintf(file, "menu_music_volume=%.3f\n", app->menu_music_volume);
-    fprintf(file, "game_music_volume=%.3f\n", app->game_music_volume);
-    fprintf(file, "online_name=%s\n", app->online_name);
-
-    fclose(file);
-    return true;
+    return secure_io_write_file(g_settings_path, payload, (size_t)written);
 }

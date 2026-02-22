@@ -767,7 +767,7 @@ int run_main_loop(void) {
 
     ai_worker_shutdown(&worker);
     online_worker_shutdown(&online_worker);
-    profile_save(&app.profile, "profile.dat");
+    profile_save(&app.profile, app_profile_storage_path());
     app_save_settings(&app);
     app_online_store_current_match(&app);
     app_online_save_sessions(&app);

@@ -57,6 +57,7 @@ set(CHESS_SOURCES
     src/network/client.c
     src/network/matchmaker.c
     src/data/profile_mgr.c
+    src/data/secure_io.c
 )
 
 add_executable(chess_app ${CHESS_SOURCES})
@@ -74,7 +75,35 @@ endif()
 
 # Explicit Windows system libraries for MinGW/clang toolchains.
 if(WIN32)
-    target_link_libraries(chess_app PRIVATE ws2_32 gdi32 winmm opengl32)
+    target_link_libraries(chess_app PRIVATE ws2_32 gdi32 winmm opengl32 crypt32)
+endif()
+
+# ------------------------------------------------------------
+# One-file portable package target (Windows self-extracting EXE)
+# ------------------------------------------------------------
+if(WIN32)
+    find_program(CHESS_7Z_EXE
+        NAMES 7z 7z.exe
+        HINTS
+            "$ENV{ProgramFiles}/7-Zip"
+            "$ENV{ProgramW6432}/7-Zip"
+    )
+
+    if(NOT CHESS_7Z_EXE)
+        message(WARNING "7z.exe was not found. Install 7-Zip (example: winget install --id 7zip.7zip).")
+    endif()
+
+    add_custom_target(chess_onefile
+        COMMAND ${CMAKE_COMMAND}
+            -DCHESS_APP_EXE=$<TARGET_FILE:chess_app>
+            -DCHESS_SOURCE_ASSETS=${CMAKE_SOURCE_DIR}/assets
+            -DCHESS_OUT_DIR=${CMAKE_BINARY_DIR}/release
+            -DCHESS_7Z_EXE=${CHESS_7Z_EXE}
+            -P ${CMAKE_SOURCE_DIR}/cmake/build_onefile.cmake
+        DEPENDS chess_app
+        COMMENT "Building standalone one-file Chess executable"
+        VERBATIM
+    )
 endif()
 
 # ------------------------------------------------------------

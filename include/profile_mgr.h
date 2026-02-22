@@ -3,7 +3,7 @@
 
 /*
  * Lightweight profile persistence API.
- * Stores username and win/loss counters in a simple local text file.
+ * Stores username and win/loss counters in an encrypted local file.
  */
 
 #include <stdbool.h>

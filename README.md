@@ -149,6 +149,26 @@ Run:
 chess_app.exe          # Windows
 ```
 
+### Build One-File EXE (Windows)
+
+Install 7-Zip (must provide `7z.exe` and `7z.sfx`), then run:
+
+```bash
+cmake --build build --target chess_onefile
+```
+
+Or use one command from project root:
+
+```bat
+tools\package_onefile.bat
+```
+
+Output file:
+
+```text
+build/release/Chess-OneFile.exe
+```
+
 ## Configuration Options
 
 CMake options:
@@ -229,17 +249,15 @@ Important:
 
 ## Data Persistence
 
-The app writes `profile.dat` in the working directory.
+On Windows, local data is stored outside the executable folder in:
 
-Format:
-
-```ini
-username=Player
-wins=0
-losses=0
+```text
+%LOCALAPPDATA%\Chess\SecureData\
 ```
 
-Profile is loaded at startup, updated after single-player checkmates, and saved on exit.
+Files include profile/settings/online session snapshots and are persisted in encrypted format.
+
+Legacy plaintext files found in the working directory are migrated automatically on first run.
 
 ## Known Limitations
 
