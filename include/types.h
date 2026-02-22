@@ -55,7 +55,8 @@ typedef enum AppScreen {
 typedef enum LobbyView {
     LOBBY_VIEW_HOME = 0,
     LOBBY_VIEW_JOIN = 1,
-    LOBBY_VIEW_HOST = 2
+    LOBBY_VIEW_HOST = 2,
+    LOBBY_VIEW_ACTIVE = 3
 } LobbyView;
 
 /* Built-in visual themes exposed in the settings screen. */

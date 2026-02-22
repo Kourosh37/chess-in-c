@@ -223,6 +223,9 @@ static void maybe_process_network(ChessApp* app) {
                 app->online_match_active = true;
                 app->online_local_ready = false;
                 app->online_peer_ready = false;
+                app->network.invite_code[0] = '\0';
+                app->lobby_code[0] = '\0';
+                app->online_match_code[0] = '\0';
                 snprintf(app->online_runtime_status,
                          sizeof(app->online_runtime_status),
                          "Match started.");
@@ -250,15 +253,15 @@ static void maybe_process_network(ChessApp* app) {
                 app->online_peer_ready = false;
 
                 if (app->online_match_active) {
-                    app->online_match_active = false;
-                    app->leave_confirm_open = false;
-                    app->network.connected = false;
+                    app_online_end_match(app, false);
+                    app->screen = SCREEN_MENU;
+                    audio_play(AUDIO_SFX_GAME_OVER);
                     snprintf(app->online_runtime_status,
                              sizeof(app->online_runtime_status),
-                             "Opponent left the match.");
+                             "Opponent left the game. Match ended.");
                     snprintf(app->lobby_status,
                              sizeof(app->lobby_status),
-                             "Opponent left the match. You can host/join a new game.");
+                             "Your opponent left the game. Match ended.");
                 } else if (app->network.is_host) {
                     app->network.connected = false;
                     snprintf(app->online_runtime_status,

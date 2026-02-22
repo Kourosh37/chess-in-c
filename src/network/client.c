@@ -383,8 +383,7 @@ bool network_client_poll(NetworkClient* client, NetPacket* out_packet) {
     packet.sequence = ntohl(packet.sequence);
 
     if (client->is_host && packet.type == NET_MSG_JOIN_REQUEST) {
-        if (client->peer_addr_len == 0 ||
-            sockaddr_equals((const struct sockaddr*)client->peer_addr_storage, (const struct sockaddr*)&from)) {
+        if (client->invite_code[0] != '\0' && client->peer_addr_len == 0) {
             NetPacket ack;
 
             set_peer(client, (const struct sockaddr*)&from, (int)from_len);

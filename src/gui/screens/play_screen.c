@@ -176,20 +176,58 @@ static void draw_move_log_panel(ChessApp* app, Rectangle panel) {
 /* Draws a blocking confirmation dialog when user attempts to leave a running game. */
 static void draw_leave_confirm_dialog(ChessApp* app) {
     const GuiPalette* palette = gui_palette();
+    bool online_mode = (app->mode == MODE_ONLINE && app->online_match_active);
     float sw = (float)GetScreenWidth();
     float sh = (float)GetScreenHeight();
-    float panel_w = sw * 0.48f;
-    float panel_h = (app->mode == MODE_ONLINE) ? 250.0f : 210.0f;
+    float panel_w = sw * 0.56f;
+    float title_size;
+    float body_size;
+    float body_line_h;
+    float body_block_h;
+    float button_h;
+    float button_gap;
+    float actions_h;
+    float panel_h;
+    float content_x;
+    float content_w;
+    float text_y;
+    float actions_y;
+    bool stack_online_buttons;
     Rectangle panel;
     Rectangle stay_btn;
     Rectangle menu_btn;
     Rectangle leave_btn;
 
-    if (panel_w < 500.0f) {
-        panel_w = 500.0f;
+    if (panel_w < 360.0f) {
+        panel_w = 360.0f;
     }
     if (panel_w > 720.0f) {
         panel_w = 720.0f;
+    }
+    if (panel_w > sw - 20.0f) {
+        panel_w = sw - 20.0f;
+    }
+
+    title_size = (panel_w < 460.0f) ? 30.0f : 34.0f;
+    body_size = (panel_w < 460.0f) ? 18.0f : 20.0f;
+    body_line_h = body_size + 8.0f;
+    body_block_h = online_mode ? (body_line_h * 3.0f) : (body_line_h * 2.0f);
+    button_h = (panel_w < 460.0f) ? 42.0f : 46.0f;
+    button_gap = (panel_w < 460.0f) ? 10.0f : 12.0f;
+    stack_online_buttons = online_mode && panel_w < 640.0f;
+
+    if (online_mode) {
+        actions_h = stack_online_buttons ? (button_h * 3.0f + button_gap * 2.0f) : button_h;
+    } else {
+        actions_h = button_h;
+    }
+
+    panel_h = 24.0f + title_size + 14.0f + body_block_h + 20.0f + actions_h + 20.0f;
+    if (panel_h < (online_mode ? 258.0f : 214.0f)) {
+        panel_h = online_mode ? 258.0f : 214.0f;
+    }
+    if (panel_h > sh - 20.0f) {
+        panel_h = sh - 20.0f;
     }
 
     panel = (Rectangle){
@@ -203,36 +241,67 @@ static void draw_leave_confirm_dialog(ChessApp* app) {
     DrawRectangleRounded(panel, 0.08f, 8, Fade(palette->panel, 0.98f));
     DrawRectangleRoundedLinesEx(panel, 0.08f, 8, 1.4f, palette->panel_border);
 
-    gui_draw_text("Leave Current Game?", (int)panel.x + 20, (int)panel.y + 20, 34, palette->text_primary);
+    content_x = panel.x + 20.0f;
+    content_w = panel.width - 40.0f;
+    text_y = panel.y + 24.0f + title_size + 14.0f;
 
-    if (app->mode == MODE_ONLINE && app->online_match_active) {
-        gui_draw_text("Menu: game stays active in background and can be resumed from lobby/menu.",
-                 (int)panel.x + 20,
-                 (int)panel.y + 74,
-                 20,
-                 palette->text_secondary);
-        gui_draw_text("Leave Match: notifies opponent and closes this online session.",
-                 (int)panel.x + 20,
-                 (int)panel.y + 102,
-                 20,
-                 palette->text_secondary);
+    gui_draw_text("Leave Current Game?", (int)content_x, (int)panel.y + 24, (int)title_size, palette->text_primary);
+
+    if (online_mode) {
+        gui_draw_text("Menu (Keep Match): keep match in background.",
+                      (int)content_x,
+                      (int)text_y,
+                      (int)body_size,
+                      palette->text_secondary);
+        gui_draw_text("Resume later from Active Games.",
+                      (int)content_x,
+                      (int)(text_y + body_line_h),
+                      (int)body_size,
+                      palette->text_secondary);
+        gui_draw_text("Leave Match: notify opponent and end this match.",
+                      (int)content_x,
+                      (int)(text_y + body_line_h * 2.0f),
+                      (int)body_size,
+                      palette->text_secondary);
     } else {
-        gui_draw_text("If you leave now, this match state will be closed.",
-                 (int)panel.x + 20,
-                 (int)panel.y + 84,
-                 22,
-                 palette->text_secondary);
+        gui_draw_text("If you leave now, this match will be closed.",
+                      (int)content_x,
+                      (int)text_y,
+                      (int)body_size,
+                      palette->text_secondary);
+        gui_draw_text("You can start a new game from the main menu.",
+                      (int)content_x,
+                      (int)(text_y + body_line_h),
+                      (int)body_size,
+                      palette->text_secondary);
     }
 
-    stay_btn = (Rectangle){panel.x + 20.0f, panel.y + panel.height - 64.0f, 130.0f, 44.0f};
+    actions_y = panel.y + panel.height - 20.0f - actions_h;
+
+    if (online_mode && stack_online_buttons) {
+        stay_btn = (Rectangle){content_x, actions_y, content_w, button_h};
+        menu_btn = (Rectangle){content_x, actions_y + button_h + button_gap, content_w, button_h};
+        leave_btn = (Rectangle){content_x, actions_y + (button_h + button_gap) * 2.0f, content_w, button_h};
+    } else if (online_mode) {
+        float available = content_w - button_gap * 2.0f;
+        float stay_w = available * 0.22f;
+        float leave_w = available * 0.26f;
+        float menu_w = available - stay_w - leave_w;
+
+        stay_btn = (Rectangle){content_x, actions_y, stay_w, button_h};
+        menu_btn = (Rectangle){stay_btn.x + stay_btn.width + button_gap, actions_y, menu_w, button_h};
+        leave_btn = (Rectangle){menu_btn.x + menu_btn.width + button_gap, actions_y, leave_w, button_h};
+    } else {
+        float each = (content_w - button_gap) * 0.5f;
+        stay_btn = (Rectangle){content_x, actions_y, each, button_h};
+        leave_btn = (Rectangle){stay_btn.x + stay_btn.width + button_gap, actions_y, each, button_h};
+    }
+
     if (gui_button(stay_btn, "Stay")) {
         app->leave_confirm_open = false;
     }
 
-    if (app->mode == MODE_ONLINE && app->online_match_active) {
-        menu_btn = (Rectangle){panel.x + 166.0f, panel.y + panel.height - 64.0f, 208.0f, 44.0f};
-        leave_btn = (Rectangle){panel.x + panel.width - 172.0f, panel.y + panel.height - 64.0f, 152.0f, 44.0f};
-
+    if (online_mode) {
         if (gui_button(menu_btn, "Menu (Keep Match)")) {
             app->screen = SCREEN_MENU;
             app->leave_confirm_open = false;
@@ -247,12 +316,12 @@ static void draw_leave_confirm_dialog(ChessApp* app) {
         if (gui_button(leave_btn, "Leave Match")) {
             app_online_end_match(app, true);
             app->screen = SCREEN_MENU;
+            app->leave_confirm_open = false;
             app->has_selection = false;
             app->selected_square = -1;
             app->move_animating = false;
         }
     } else {
-        leave_btn = (Rectangle){panel.x + panel.width - 172.0f, panel.y + panel.height - 64.0f, 152.0f, 44.0f};
         if (gui_button(leave_btn, "Leave")) {
             app->screen = SCREEN_MENU;
             app->leave_confirm_open = false;

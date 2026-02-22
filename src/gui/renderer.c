@@ -297,9 +297,8 @@ static void update_board_rotation(const ChessApp* app) {
     float dt = GetFrameTime();
     Side target_side = board_target_side(app);
     float target_deg = (target_side == SIDE_WHITE) ? 0.0f : 180.0f;
-    float speed = 900.0f;
+    float lerp_factor;
     float diff;
-    float step;
 
     if (!g_view_initialized) {
         g_view_initialized = true;
@@ -317,23 +316,20 @@ static void update_board_rotation(const ChessApp* app) {
         diff += 360.0f;
     }
 
-    step = speed * dt;
-    if (step < 0.5f) {
-        step = 0.5f;
+    lerp_factor = 1.0f - expf(-8.0f * dt);
+    if (lerp_factor < 0.10f) {
+        lerp_factor = 0.10f;
+    }
+    if (lerp_factor > 0.38f) {
+        lerp_factor = 0.38f;
     }
 
-    if (fabsf(diff) <= 1.0f) {
+    if (fabsf(diff) <= 0.35f) {
         g_board_rotation_deg = target_deg;
         g_board_input_side = target_side;
         g_board_rotating = false;
     } else {
-        if (diff > step) {
-            diff = step;
-        } else if (diff < -step) {
-            diff = -step;
-        }
-
-        g_board_rotation_deg += diff;
+        g_board_rotation_deg += diff * lerp_factor;
         while (g_board_rotation_deg >= 360.0f) {
             g_board_rotation_deg -= 360.0f;
         }

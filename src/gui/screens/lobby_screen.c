@@ -102,6 +102,44 @@ void gui_screen_lobby(struct ChessApp* app) {
     DrawRectangleRounded(card, 0.08f, 8, Fade(palette->panel_alt, 0.95f));
     DrawRectangleRoundedLinesEx(card, 0.08f, 8, 1.0f, palette->panel_border);
 
+    if (app->lobby_view == LOBBY_VIEW_ACTIVE) {
+        Rectangle action_btn = {card.x + 36.0f, card.y + 154.0f, card.width - 72.0f, 60.0f};
+        Rectangle lobby_btn = {card.x + 36.0f, card.y + 224.0f, card.width - 72.0f, 52.0f};
+        Rectangle status_box = {card.x + 36.0f, card.y + 292.0f, card.width - 72.0f, card.height - 336.0f};
+
+        gui_draw_text("Active Games", (int)card.x + 36, (int)card.y + 40, 34, palette->text_primary);
+
+        if (app->online_match_active) {
+            gui_draw_text("1 active online match", (int)card.x + 36, (int)card.y + 96, 24, palette->text_secondary);
+
+            if (gui_button(action_btn, "Join Active Match")) {
+                app->mode = MODE_ONLINE;
+                app->screen = SCREEN_PLAY;
+                snprintf(app->online_runtime_status,
+                         sizeof(app->online_runtime_status),
+                         "Resumed active match.");
+                return;
+            }
+        } else {
+            gui_draw_text("No active games.", (int)card.x + 36, (int)card.y + 96, 24, palette->text_secondary);
+            DrawRectangleRounded(action_btn, 0.20f, 10, Fade(palette->panel, 0.85f));
+            DrawRectangleRoundedLinesEx(action_btn, 0.20f, 10, 1.0f, palette->panel_border);
+            gui_draw_text("Join Active Match",
+                          (int)action_btn.x + 24,
+                          (int)action_btn.y + 18,
+                          24,
+                          palette->text_secondary);
+        }
+
+        if (gui_button(lobby_btn, "Open Online Lobby")) {
+            app->lobby_view = LOBBY_VIEW_HOME;
+            return;
+        }
+
+        draw_status_box(status_box, "Status", app->lobby_status);
+        return;
+    }
+
     if (app->lobby_view == LOBBY_VIEW_HOME) {
         Rectangle join_btn = {card.x + 36.0f, card.y + 116.0f, card.width - 72.0f, 64.0f};
         Rectangle host_btn = {card.x + 36.0f, card.y + 196.0f, card.width - 72.0f, 64.0f};
@@ -118,7 +156,6 @@ void gui_screen_lobby(struct ChessApp* app) {
         }
 
         if (gui_button(host_btn, "Host Game")) {
-            app->human_side = SIDE_WHITE;
             app->mode = MODE_ONLINE;
             app->online_match_active = false;
             app->online_local_ready = false;
@@ -128,6 +165,7 @@ void gui_screen_lobby(struct ChessApp* app) {
             app->lobby_copy_feedback_timer = 0.0f;
 
             if (network_client_host(&app->network, app->profile.username, app->lobby_code)) {
+                app->human_side = app->network.host_side;
                 app->lobby_view = LOBBY_VIEW_HOST;
                 strncpy(app->online_match_code, app->lobby_code, INVITE_CODE_LEN);
                 app->online_match_code[INVITE_CODE_LEN] = '\0';
@@ -270,6 +308,9 @@ void gui_screen_lobby(struct ChessApp* app) {
                 app->online_match_active = true;
                 app->online_local_ready = false;
                 app->online_peer_ready = false;
+                app->network.invite_code[0] = '\0';
+                app->lobby_code[0] = '\0';
+                app->online_match_code[0] = '\0';
                 snprintf(app->online_runtime_status, sizeof(app->online_runtime_status), "Match started.");
                 app_start_game(app, MODE_ONLINE);
                 return;

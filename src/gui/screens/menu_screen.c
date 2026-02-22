@@ -77,10 +77,10 @@ void gui_screen_menu(struct ChessApp* app) {
     Rectangle single_btn;
     Rectangle local_btn;
     Rectangle online_btn;
-    Rectangle resume_btn;
+    Rectangle active_btn;
     Rectangle settings_btn;
     Rectangle exit_btn;
-    bool has_resume = (app->mode == MODE_ONLINE && app->online_match_active);
+    int active_games = app->online_match_active ? 1 : 0;
     bool input_locked = app->exit_confirm_open;
 
     if (panel_w < 520.0f) {
@@ -89,7 +89,7 @@ void gui_screen_menu(struct ChessApp* app) {
     if (panel_w > 760.0f) {
         panel_w = 760.0f;
     }
-    panel_min_h = has_resume ? 620.0f : 560.0f;
+    panel_min_h = 620.0f;
     if (panel_h < panel_min_h) {
         panel_h = panel_min_h;
     }
@@ -124,9 +124,9 @@ void gui_screen_menu(struct ChessApp* app) {
     single_btn = (Rectangle){panel.x + 42.0f, panel.y + 184.0f, panel.width - 84.0f, 58.0f};
     local_btn = (Rectangle){panel.x + 42.0f, panel.y + 255.0f, panel.width - 84.0f, 58.0f};
     online_btn = (Rectangle){panel.x + 42.0f, panel.y + 326.0f, panel.width - 84.0f, 58.0f};
-    resume_btn = (Rectangle){panel.x + 42.0f, panel.y + 397.0f, panel.width - 84.0f, 58.0f};
-    settings_btn = (Rectangle){panel.x + 42.0f, panel.y + (has_resume ? 468.0f : 397.0f), panel.width - 84.0f, 58.0f};
-    exit_btn = (Rectangle){panel.x + 42.0f, panel.y + (has_resume ? 539.0f : 468.0f), panel.width - 84.0f, 52.0f};
+    active_btn = (Rectangle){panel.x + 42.0f, panel.y + 397.0f, panel.width - 84.0f, 58.0f};
+    settings_btn = (Rectangle){panel.x + 42.0f, panel.y + 468.0f, panel.width - 84.0f, 58.0f};
+    exit_btn = (Rectangle){panel.x + 42.0f, panel.y + 539.0f, panel.width - 84.0f, 52.0f};
 
     if (!input_locked) {
         if (gui_button(single_btn, "Single Player")) {
@@ -158,8 +158,14 @@ void gui_screen_menu(struct ChessApp* app) {
             snprintf(app->lobby_status, sizeof(app->lobby_status), "Choose Host Game or Join Game.");
         }
 
-        if (has_resume && gui_button(resume_btn, "Resume Online Match")) {
-            app->screen = SCREEN_PLAY;
+        if (gui_button(active_btn, "Active Games")) {
+            app->screen = SCREEN_LOBBY;
+            app->lobby_view = LOBBY_VIEW_ACTIVE;
+            if (active_games > 0) {
+                snprintf(app->lobby_status, sizeof(app->lobby_status), "You have an active online match.");
+            } else {
+                snprintf(app->lobby_status, sizeof(app->lobby_status), "No active games.");
+            }
         }
 
         if (gui_button(settings_btn, "Settings")) {
@@ -171,7 +177,23 @@ void gui_screen_menu(struct ChessApp* app) {
         }
     }
 
-    if (has_resume) {
+    {
+        char count_text[16];
+        int count_w;
+        Rectangle badge = {active_btn.x + active_btn.width - 76.0f, active_btn.y + 14.0f, 50.0f, 30.0f};
+
+        DrawRectangleRounded(badge, 0.35f, 8, Fade(palette->panel, 0.90f));
+        DrawRectangleRoundedLinesEx(badge, 0.35f, 8, 1.0f, palette->panel_border);
+        snprintf(count_text, sizeof(count_text), "%d", active_games);
+        count_w = gui_measure_text(count_text, 20);
+        gui_draw_text(count_text,
+                      (int)(badge.x + (badge.width - (float)count_w) * 0.5f),
+                      (int)badge.y + 6,
+                      20,
+                      palette->text_primary);
+    }
+
+    if (active_games > 0) {
         gui_draw_text(app->online_runtime_status,
                       (int)panel.x + 42,
                       (int)panel.y + panel.height - 28,
