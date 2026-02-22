@@ -383,6 +383,7 @@ static void draw_leave_confirm_dialog(ChessApp* app) {
 
     if (online_mode) {
         if (gui_button(menu_btn, "Menu (Keep Match)")) {
+            app_online_store_current_match(app);
             app->screen = SCREEN_MENU;
             app->leave_confirm_open = false;
             app->has_selection = false;
@@ -415,6 +416,9 @@ static void draw_leave_confirm_dialog(ChessApp* app) {
 
 void gui_screen_play(struct ChessApp* app) {
     const GuiPalette* palette = gui_palette();
+    OnlineMatch* current_match = app_online_get(app, app->current_online_match);
+    bool online_connected = (current_match != NULL) && current_match->network.connected;
+    bool online_active = (current_match != NULL) && current_match->in_game;
     GuiPlayLayout layout = gui_get_play_layout();
     float capture_height = layout.sidebar.height * 0.26f;
     float top_capture_bottom = layout.sidebar.y + 70.0f + capture_height;
@@ -548,10 +552,10 @@ void gui_screen_play(struct ChessApp* app) {
         if (app->mode == MODE_SINGLE && app->ai_thinking) {
             draw_text_fit("AI is thinking...", content_x, y, status_size, content_w, palette->accent);
             y += status_size + 8;
-        } else if (app->mode == MODE_ONLINE && app->online_match_active && app->network.connected && !app_is_human_turn(app)) {
+        } else if (app->mode == MODE_ONLINE && online_active && online_connected && !app_is_human_turn(app)) {
             draw_text_fit("Waiting for opponent...", content_x, y, status_size, content_w, palette->accent);
             y += status_size + 8;
-        } else if (app->mode == MODE_ONLINE && !app->network.connected) {
+        } else if (app->mode == MODE_ONLINE && !online_connected) {
             draw_text_fit("Opponent disconnected.",
                           content_x,
                           y,
@@ -647,7 +651,7 @@ void gui_screen_play(struct ChessApp* app) {
     }
 
     {
-        bool online_input_ok = (app->mode != MODE_ONLINE) || (app->online_match_active && app->network.connected);
+        bool online_input_ok = (app->mode != MODE_ONLINE) || (online_active && online_connected);
         bool input_allowed = app_is_human_turn(app) &&
                              !app->move_animating &&
                              !gui_board_is_rotating() &&
@@ -691,8 +695,8 @@ void gui_screen_play(struct ChessApp* app) {
                     app->has_selection = false;
                     app->selected_square = -1;
 
-                    if (app->mode == MODE_ONLINE && app->network.connected) {
-                        network_client_send_move(&app->network, selected_move);
+                    if (app->mode == MODE_ONLINE && current_match != NULL && current_match->network.connected) {
+                        network_client_send_move(&current_match->network, selected_move);
                     }
                 } else if (square_has_turn_piece(app, square) && has_move_from(app, square)) {
                     app->selected_square = square;

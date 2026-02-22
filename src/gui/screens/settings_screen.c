@@ -266,6 +266,7 @@ void gui_screen_settings(struct ChessApp* app) {
     Rectangle back_btn;
     Rectangle difficulty_row;
     Rectangle theme_row;
+    Rectangle online_name_row;
     Rectangle toggle_btn;
     Rectangle sfx_row;
     Rectangle menu_music_row;
@@ -328,6 +329,12 @@ void gui_screen_settings(struct ChessApp* app) {
     theme_row = (Rectangle){
         left_card.x + card_inner,
         left_rows_y + row_h + row_gap,
+        left_card.width - card_inner * 2.0f,
+        row_h
+    };
+    online_name_row = (Rectangle){
+        left_card.x + card_inner,
+        theme_row.y + row_h + row_gap,
         left_card.width - card_inner * 2.0f,
         row_h
     };
@@ -399,6 +406,45 @@ void gui_screen_settings(struct ChessApp* app) {
             app->theme = (ColorTheme)next;
             gui_set_active_theme(next);
             dirty = true;
+        }
+
+        {
+            Rectangle name_input = {
+                online_name_row.x + 14.0f,
+                online_name_row.y + 36.0f,
+                online_name_row.width - 28.0f,
+                online_name_row.height - 44.0f
+            };
+            char before_name[PLAYER_NAME_MAX + 1];
+
+            DrawRectangleRounded(online_name_row, 0.10f, 8, Fade(palette->panel, 0.92f));
+            DrawRectangleRoundedLinesEx(online_name_row, 0.10f, 8, 1.0f, palette->panel_border);
+            gui_draw_text("Online Name",
+                          (int)online_name_row.x + 16,
+                          (int)online_name_row.y + 10,
+                          21,
+                          palette->text_primary);
+
+            if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) || IsMouseButtonPressed(MOUSE_RIGHT_BUTTON)) {
+                app->online_name_input_active = CheckCollisionPointRec(GetMousePosition(), name_input);
+            }
+
+            strncpy(before_name, app->online_name, PLAYER_NAME_MAX);
+            before_name[PLAYER_NAME_MAX] = '\0';
+
+            gui_input_box(name_input, app->online_name, PLAYER_NAME_MAX + 1, app->online_name_input_active);
+            if (strcmp(before_name, app->online_name) != 0) {
+                dirty = true;
+            }
+
+            if (app->online_name[0] == '\0') {
+                draw_text_fit("Required for online mode.",
+                              (int)online_name_row.x + 16,
+                              (int)online_name_row.y + (int)online_name_row.height - 18,
+                              16,
+                              (int)online_name_row.width - 32,
+                              palette->text_secondary);
+            }
         }
     }
 

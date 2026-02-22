@@ -30,34 +30,37 @@ typedef int socklen_t;
 #endif
 
 /* Tracks process-level network runtime init (WSAStartup on Windows). */
-static bool g_network_runtime_initialized = false;
+static int g_network_runtime_refcount = 0;
 
 /* Initializes platform networking runtime. */
 static bool network_runtime_init(void) {
 #ifdef _WIN32
-    if (!g_network_runtime_initialized) {
+    if (g_network_runtime_refcount == 0) {
         WSADATA wsa;
         if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
             return false;
         }
-        g_network_runtime_initialized = true;
     }
-#else
-    g_network_runtime_initialized = true;
 #endif
+
+    g_network_runtime_refcount++;
 
     return true;
 }
 
 /* Shuts down platform networking runtime. */
 static void network_runtime_shutdown(void) {
-#ifdef _WIN32
-    if (g_network_runtime_initialized) {
-        WSACleanup();
-        g_network_runtime_initialized = false;
+    if (g_network_runtime_refcount <= 0) {
+        g_network_runtime_refcount = 0;
+        return;
     }
-#else
-    g_network_runtime_initialized = false;
+
+    g_network_runtime_refcount--;
+
+#ifdef _WIN32
+    if (g_network_runtime_refcount == 0) {
+        WSACleanup();
+    }
 #endif
 }
 
@@ -150,6 +153,18 @@ static bool send_packet(NetworkClient* client, const NetPacket* packet, const st
     return sent == (int)sizeof(wire);
 }
 
+/* Copies local username into outgoing packet for peer-side UI metadata. */
+static void packet_set_sender_username(NetworkClient* client, NetPacket* packet) {
+    if (client == NULL || packet == NULL) {
+        return;
+    }
+    if (client->local_username[0] == '\0') {
+        return;
+    }
+    strncpy(packet->username, client->local_username, PLAYER_NAME_MAX);
+    packet->username[PLAYER_NAME_MAX] = '\0';
+}
+
 /* Stores peer endpoint into client state. */
 static bool set_peer(NetworkClient* client, const struct sockaddr* addr, int addr_len) {
     if (addr_len <= 0 || addr_len > (int)sizeof(client->peer_addr_storage)) {
@@ -229,8 +244,6 @@ bool network_client_host(NetworkClient* client, const char* username, char out_c
     uint32_t ip_be;
     uint16_t port;
 
-    (void)username;
-
     if (client == NULL || !client->initialized || out_code == NULL) {
         return false;
     }
@@ -257,6 +270,13 @@ bool network_client_host(NetworkClient* client, const char* username, char out_c
     client->is_host = true;
     client->connected = false;
     client->peer_addr_len = 0;
+    if (username != NULL) {
+        strncpy(client->local_username, username, PLAYER_NAME_MAX);
+        client->local_username[PLAYER_NAME_MAX] = '\0';
+    } else {
+        client->local_username[0] = '\0';
+    }
+    client->peer_username[0] = '\0';
     return true;
 }
 
@@ -288,10 +308,15 @@ bool network_client_join(NetworkClient* client, const char* username, const char
     join_request.type = NET_MSG_JOIN_REQUEST;
     join_request.sequence = ++client->sequence;
     strncpy(join_request.username, username, PLAYER_NAME_MAX);
+    join_request.username[PLAYER_NAME_MAX] = '\0';
     strncpy(join_request.invite_code, invite_code, INVITE_CODE_LEN);
+    join_request.invite_code[INVITE_CODE_LEN] = '\0';
 
     client->is_host = false;
     client->connected = false;
+    strncpy(client->local_username, username, PLAYER_NAME_MAX);
+    client->local_username[PLAYER_NAME_MAX] = '\0';
+    client->peer_username[0] = '\0';
 
     return send_packet(client,
                        &join_request,
@@ -314,6 +339,7 @@ bool network_client_send_move(NetworkClient* client, Move move) {
     packet.promotion = move.promotion;
     packet.flags = move.flags;
     packet.sequence = ++client->sequence;
+    packet_set_sender_username(client, &packet);
 
     return send_packet(client, &packet, (const struct sockaddr*)client->peer_addr_storage, client->peer_addr_len);
 }
@@ -330,6 +356,7 @@ static bool network_client_send_control(NetworkClient* client, uint8_t type, uin
     packet.type = type;
     packet.flags = flags;
     packet.sequence = ++client->sequence;
+    packet_set_sender_username(client, &packet);
 
     return send_packet(client, &packet, (const struct sockaddr*)client->peer_addr_storage, client->peer_addr_len);
 }
@@ -345,6 +372,7 @@ bool network_client_send_leave(NetworkClient* client) {
     memset(&packet, 0, sizeof(packet));
     packet.type = NET_MSG_LEAVE;
     packet.sequence = ++client->sequence;
+    packet_set_sender_username(client, &packet);
 
     return send_packet(client,
                        &packet,
@@ -388,12 +416,18 @@ bool network_client_poll(NetworkClient* client, NetPacket* out_packet) {
 
             set_peer(client, (const struct sockaddr*)&from, (int)from_len);
             client->connected = true;
+            if (packet.username[0] != '\0') {
+                strncpy(client->peer_username, packet.username, PLAYER_NAME_MAX);
+                client->peer_username[PLAYER_NAME_MAX] = '\0';
+            }
 
             memset(&ack, 0, sizeof(ack));
             ack.type = NET_MSG_JOIN_ACCEPT;
             ack.sequence = ++client->sequence;
             ack.flags = (client->host_side == SIDE_WHITE) ? SIDE_BLACK : SIDE_WHITE;
             strncpy(ack.invite_code, client->invite_code, INVITE_CODE_LEN);
+            ack.invite_code[INVITE_CODE_LEN] = '\0';
+            packet_set_sender_username(client, &ack);
             send_packet(client, &ack, (const struct sockaddr*)&from, (int)from_len);
         } else {
             NetPacket reject;
@@ -408,6 +442,10 @@ bool network_client_poll(NetworkClient* client, NetPacket* out_packet) {
     if (!client->is_host && packet.type == NET_MSG_JOIN_ACCEPT) {
         if (sockaddr_equals((const struct sockaddr*)client->peer_addr_storage, (const struct sockaddr*)&from)) {
             client->connected = true;
+            if (packet.username[0] != '\0') {
+                strncpy(client->peer_username, packet.username, PLAYER_NAME_MAX);
+                client->peer_username[PLAYER_NAME_MAX] = '\0';
+            }
         }
     }
 

@@ -50,7 +50,7 @@ static void draw_text_fit(const char* text,
     gui_draw_text(buffer, x, y, font_size, color);
 }
 
-/* Draws a rounded status/info block used in join/host subviews. */
+/* Draws a rounded status/info block used in lobby subviews. */
 static void draw_status_box(Rectangle rect, const char* title, const char* text) {
     const GuiPalette* palette = gui_palette();
 
@@ -65,49 +65,177 @@ static void draw_status_box(Rectangle rect, const char* title, const char* text)
                   palette->text_secondary);
 }
 
-/* Closes temporary host/join room state and returns to lobby main choices. */
-static void lobby_return_home(ChessApp* app, bool notify_peer) {
-    if (notify_peer) {
-        network_client_send_leave(&app->network);
+/* Returns one status string for current focus match or global lobby status. */
+static const char* focused_status(const ChessApp* app) {
+    const OnlineMatch* match = app_online_get_const(app, app->lobby_focus_match);
+    if (match != NULL && match->status[0] != '\0') {
+        return match->status;
     }
-
-    app->network.connected = false;
-    app->network.peer_addr_len = 0;
-    app->network.is_host = false;
-    app->online_match_active = false;
-    app->online_local_ready = false;
-    app->online_peer_ready = false;
-    app->lobby_code[0] = '\0';
-    app->online_match_code[0] = '\0';
-    app->lobby_input_active = false;
-    app->lobby_copy_feedback = false;
-    app->lobby_copy_feedback_timer = 0.0f;
-    app->lobby_view = LOBBY_VIEW_HOME;
-    snprintf(app->lobby_status, sizeof(app->lobby_status), "Choose Host Game or Join Game.");
+    return app->lobby_status;
 }
 
-/* Renders and updates online lobby using a simplified host/join flow. */
+/* Opens one match in lobby context and syncs shared app runtime fields. */
+static void focus_match(ChessApp* app, int index, LobbyView view) {
+    const OnlineMatch* match = app_online_get_const(app, index);
+
+    if (match == NULL) {
+        app->lobby_focus_match = -1;
+        return;
+    }
+
+    app->lobby_focus_match = index;
+    app_online_switch_to_match(app, index, false);
+    app->lobby_view = view;
+    strncpy(app->lobby_status, match->status, sizeof(app->lobby_status) - 1);
+    app->lobby_status[sizeof(app->lobby_status) - 1] = '\0';
+}
+
+/* Draws list of active sessions sorted by latest start timestamp. */
+static void draw_active_matches(ChessApp* app, Rectangle list_rect) {
+    const GuiPalette* palette = gui_palette();
+    int sorted[ONLINE_MATCH_MAX];
+    int count = 0;
+    Vector2 mouse = GetMousePosition();
+    int item_h = 90;
+    int visible;
+    int max_start;
+    int start;
+
+    for (int i = 0; i < ONLINE_MATCH_MAX; ++i) {
+        if (app_online_get_const(app, i) != NULL) {
+            sorted[count++] = i;
+        }
+    }
+
+    for (int i = 0; i < count; ++i) {
+        for (int j = i + 1; j < count; ++j) {
+            const OnlineMatch* a = app_online_get_const(app, sorted[i]);
+            const OnlineMatch* b = app_online_get_const(app, sorted[j]);
+            if (a != NULL && b != NULL && b->started_epoch > a->started_epoch) {
+                int tmp = sorted[i];
+                sorted[i] = sorted[j];
+                sorted[j] = tmp;
+            }
+        }
+    }
+
+    DrawRectangleRounded(list_rect, 0.08f, 8, Fade(palette->panel, 0.92f));
+    DrawRectangleRoundedLinesEx(list_rect, 0.08f, 8, 1.0f, palette->panel_border);
+
+    visible = (int)((list_rect.height - 12.0f) / (float)item_h);
+    if (visible < 1) {
+        visible = 1;
+    }
+    max_start = count - visible;
+    if (max_start < 0) {
+        max_start = 0;
+    }
+
+    if (CheckCollisionPointRec(mouse, list_rect)) {
+        float wheel = GetMouseWheelMove();
+        if (wheel != 0.0f) {
+            app->lobby_active_scroll -= (int)(wheel * 2.0f);
+        }
+    }
+    if (app->lobby_active_scroll < 0) {
+        app->lobby_active_scroll = 0;
+    }
+    if (app->lobby_active_scroll > max_start) {
+        app->lobby_active_scroll = max_start;
+    }
+
+    start = app->lobby_active_scroll;
+
+    if (count == 0) {
+        gui_draw_text("No active online games.", (int)list_rect.x + 14, (int)list_rect.y + 16, 24, palette->text_secondary);
+        return;
+    }
+
+    for (int i = 0; i < visible; ++i) {
+        int item_index = start + i;
+        int slot_index;
+        const OnlineMatch* match;
+        Rectangle row;
+        Rectangle open_btn;
+        Rectangle close_btn;
+        char line[192];
+        const char* opp_name;
+
+        if (item_index >= count) {
+            break;
+        }
+
+        slot_index = sorted[item_index];
+        match = app_online_get_const(app, slot_index);
+        if (match == NULL) {
+            continue;
+        }
+
+        row = (Rectangle){
+            list_rect.x + 10.0f,
+            list_rect.y + 6.0f + (float)i * (float)item_h,
+            list_rect.width - 20.0f,
+            (float)item_h - 6.0f
+        };
+        open_btn = (Rectangle){row.x + row.width - 232.0f, row.y + row.height - 42.0f, 108.0f, 34.0f};
+        close_btn = (Rectangle){row.x + row.width - 116.0f, row.y + row.height - 42.0f, 100.0f, 34.0f};
+        opp_name = (match->opponent_name[0] != '\0') ? match->opponent_name : "Unknown";
+
+        DrawRectangleRounded(row, 0.10f, 8, Fade(palette->panel_alt, 0.95f));
+        DrawRectangleRoundedLinesEx(row, 0.10f, 8, 1.0f, palette->panel_border);
+
+        snprintf(line, sizeof(line), "Opponent: %s", opp_name);
+        draw_text_fit(line, (int)row.x + 12, (int)row.y + 8, 21, (int)row.width - 260, palette->text_primary);
+
+        snprintf(line, sizeof(line), "Start: %s", match->started_at[0] != '\0' ? match->started_at : "unknown");
+        draw_text_fit(line, (int)row.x + 12, (int)row.y + 34, 18, (int)row.width - 260, palette->text_secondary);
+
+        snprintf(line,
+                 sizeof(line),
+                 "State: %s | %s",
+                 match->in_game ? "In Game" : "Waiting Room",
+                 match->is_host ? "Host" : "Guest");
+        draw_text_fit(line, (int)row.x + 12, (int)row.y + 56, 18, (int)row.width - 260, palette->text_secondary);
+
+        if (gui_button(open_btn, match->in_game ? "Resume" : "Open")) {
+            if (match->in_game) {
+                app_online_switch_to_match(app, slot_index, true);
+                return;
+            }
+            focus_match(app, slot_index, match->is_host ? LOBBY_VIEW_HOST : LOBBY_VIEW_JOIN);
+            return;
+        }
+
+        if (gui_button(close_btn, "Close")) {
+            app_online_close_match(app, slot_index, true);
+            snprintf(app->lobby_status, sizeof(app->lobby_status), "Match closed.");
+            return;
+        }
+    }
+}
+
+/* Renders and updates online lobby flow (host/join/multi-active sessions). */
 void gui_screen_lobby(struct ChessApp* app) {
     const GuiPalette* palette = gui_palette();
     float sw = (float)GetScreenWidth();
     float sh = (float)GetScreenHeight();
-    float panel_w = sw * 0.68f;
-    float panel_h = sh * 0.74f;
+    float panel_w = sw * 0.72f;
+    float panel_h = sh * 0.78f;
     Rectangle panel;
     Rectangle back_btn;
     Rectangle card;
 
-    if (panel_w < 760.0f) {
-        panel_w = 760.0f;
+    if (panel_w < 780.0f) {
+        panel_w = 780.0f;
     }
-    if (panel_w > 980.0f) {
-        panel_w = 980.0f;
+    if (panel_w > 1020.0f) {
+        panel_w = 1020.0f;
     }
     if (panel_h < 620.0f) {
         panel_h = 620.0f;
     }
-    if (panel_h > 700.0f) {
-        panel_h = 700.0f;
+    if (panel_h > 740.0f) {
+        panel_h = 740.0f;
     }
 
     if (app->lobby_copy_feedback_timer > 0.0f) {
@@ -126,9 +254,9 @@ void gui_screen_lobby(struct ChessApp* app) {
     };
     card = (Rectangle){
         panel.x + 28.0f,
-        panel.y + 108.0f,
+        panel.y + 106.0f,
         panel.width - 56.0f,
-        panel.height - 136.0f
+        panel.height - 132.0f
     };
 
     DrawRectangleRounded((Rectangle){panel.x + 5.0f, panel.y + 6.0f, panel.width, panel.height},
@@ -138,13 +266,15 @@ void gui_screen_lobby(struct ChessApp* app) {
     DrawRectangleRounded(panel, 0.08f, 8, Fade(palette->panel, 0.95f));
     DrawRectangleRoundedLinesEx(panel, 0.08f, 8, 1.4f, palette->panel_border);
 
-    gui_draw_text("Online", (int)panel.x + 30, (int)panel.y + 30, 48, palette->text_primary);
-    back_btn = (Rectangle){panel.x + panel.width - 176.0f, panel.y + 28.0f, 146.0f, 50.0f};
+    gui_draw_text("Online", (int)panel.x + 30, (int)panel.y + 28, 48, palette->text_primary);
+    {
+        char name_line[96];
+        snprintf(name_line, sizeof(name_line), "Name: %s", app->online_name[0] != '\0' ? app->online_name : "(not set)");
+        gui_draw_text(name_line, (int)panel.x + 34, (int)panel.y + 74, 20, palette->text_secondary);
+    }
+
+    back_btn = (Rectangle){panel.x + panel.width - 176.0f, panel.y + 24.0f, 146.0f, 50.0f};
     if (gui_button(back_btn, "Back")) {
-        if (!app->online_match_active &&
-            (app->lobby_view != LOBBY_VIEW_HOME || app->network.connected || app->network.is_host)) {
-            lobby_return_home(app, app->network.connected);
-        }
         app->screen = SCREEN_MENU;
         return;
     }
@@ -153,36 +283,50 @@ void gui_screen_lobby(struct ChessApp* app) {
     DrawRectangleRoundedLinesEx(card, 0.08f, 8, 1.0f, palette->panel_border);
 
     if (app->lobby_view == LOBBY_VIEW_ACTIVE) {
-        Rectangle action_btn = {card.x + 36.0f, card.y + 154.0f, card.width - 72.0f, 60.0f};
-        Rectangle lobby_btn = {card.x + 36.0f, card.y + 224.0f, card.width - 72.0f, 52.0f};
-        Rectangle status_box = {card.x + 36.0f, card.y + 292.0f, card.width - 72.0f, card.height - 336.0f};
+        Rectangle list_rect = {card.x + 28.0f, card.y + 78.0f, card.width - 56.0f, card.height - 160.0f};
+        Rectangle lobby_btn = {card.x + 28.0f, card.y + card.height - 68.0f, 220.0f, 42.0f};
 
-        gui_draw_text("Active Games", (int)card.x + 36, (int)card.y + 40, 34, palette->text_primary);
-
-        if (app->online_match_active) {
-            gui_draw_text("1 active online match", (int)card.x + 36, (int)card.y + 96, 24, palette->text_secondary);
-
-            if (gui_button(action_btn, "Join Active Match")) {
-                app->mode = MODE_ONLINE;
-                app->screen = SCREEN_PLAY;
-                snprintf(app->online_runtime_status,
-                         sizeof(app->online_runtime_status),
-                         "Resumed active match.");
-                return;
-            }
-        } else {
-            gui_draw_text("No active games.", (int)card.x + 36, (int)card.y + 96, 24, palette->text_secondary);
-            DrawRectangleRounded(action_btn, 0.20f, 10, Fade(palette->panel, 0.85f));
-            DrawRectangleRoundedLinesEx(action_btn, 0.20f, 10, 1.0f, palette->panel_border);
-            gui_draw_text("Join Active Match",
-                          (int)action_btn.x + 24,
-                          (int)action_btn.y + 18,
-                          24,
-                          palette->text_secondary);
-        }
+        gui_draw_text("Active Games", (int)card.x + 28, (int)card.y + 30, 34, palette->text_primary);
+        draw_active_matches(app, list_rect);
 
         if (gui_button(lobby_btn, "Open Online Lobby")) {
             app->lobby_view = LOBBY_VIEW_HOME;
+            app->lobby_focus_match = -1;
+            return;
+        }
+        return;
+    }
+
+    if (app->lobby_view == LOBBY_VIEW_HOME) {
+        Rectangle join_btn = {card.x + 36.0f, card.y + 116.0f, card.width - 72.0f, 64.0f};
+        Rectangle host_btn = {card.x + 36.0f, card.y + 196.0f, card.width - 72.0f, 64.0f};
+        Rectangle active_btn = {card.x + 36.0f, card.y + 276.0f, card.width - 72.0f, 56.0f};
+        Rectangle status_box = {card.x + 36.0f, card.y + card.height - 150.0f, card.width - 72.0f, 108.0f};
+
+        gui_draw_text("Choose one option", (int)card.x + 36, (int)card.y + 38, 34, palette->text_primary);
+
+        if (gui_button(join_btn, "Join Game")) {
+            app->lobby_view = LOBBY_VIEW_JOIN;
+            app->lobby_focus_match = -1;
+            app->lobby_input[0] = '\0';
+            app->lobby_input_active = true;
+            snprintf(app->lobby_status, sizeof(app->lobby_status), "Enter invite code and press Join.");
+        }
+
+        if (gui_button(host_btn, "Host Game")) {
+            int idx = app_online_create_host(app, app->online_name);
+            if (idx >= 0) {
+                focus_match(app, idx, LOBBY_VIEW_HOST);
+            } else {
+                snprintf(app->lobby_status,
+                         sizeof(app->lobby_status),
+                         "Could not create host room (limit reached or network error).");
+            }
+        }
+
+        if (gui_button(active_btn, "Open Active Games")) {
+            app->lobby_view = LOBBY_VIEW_ACTIVE;
+            app->lobby_focus_match = -1;
             return;
         }
 
@@ -190,60 +334,18 @@ void gui_screen_lobby(struct ChessApp* app) {
         return;
     }
 
-    if (app->lobby_view == LOBBY_VIEW_HOME) {
-        Rectangle join_btn = {card.x + 36.0f, card.y + 116.0f, card.width - 72.0f, 64.0f};
-        Rectangle host_btn = {card.x + 36.0f, card.y + 196.0f, card.width - 72.0f, 64.0f};
-        Rectangle status_box = {card.x + 36.0f, card.y + card.height - 150.0f, card.width - 72.0f, 108.0f};
-
-        gui_draw_text("Choose one option", (int)card.x + 36, (int)card.y + 38, 34, palette->text_primary);
-
-        if (gui_button(join_btn, "Join Game")) {
-            app->lobby_view = LOBBY_VIEW_JOIN;
-            app->lobby_input_active = true;
-            app->online_local_ready = false;
-            app->online_peer_ready = false;
-            snprintf(app->lobby_status, sizeof(app->lobby_status), "Enter invite code and press Join.");
-        }
-
-        if (gui_button(host_btn, "Host Game")) {
-            app->mode = MODE_ONLINE;
-            app->online_match_active = false;
-            app->online_local_ready = false;
-            app->online_peer_ready = false;
-            app->lobby_input_active = false;
-            app->lobby_copy_feedback = false;
-            app->lobby_copy_feedback_timer = 0.0f;
-
-            if (network_client_host(&app->network, app->profile.username, app->lobby_code)) {
-                app->human_side = app->network.host_side;
-                app->lobby_view = LOBBY_VIEW_HOST;
-                strncpy(app->online_match_code, app->lobby_code, INVITE_CODE_LEN);
-                app->online_match_code[INVITE_CODE_LEN] = '\0';
-                snprintf(app->online_runtime_status,
-                         sizeof(app->online_runtime_status),
-                         "Room created. Share code with opponent.");
-                snprintf(app->lobby_status,
-                         sizeof(app->lobby_status),
-                         "Waiting for player to join room.");
-            } else {
-                snprintf(app->lobby_status, sizeof(app->lobby_status), "Failed to create host room.");
-            }
-        }
-
-        draw_status_box(status_box, "Status", app->lobby_status);
-        return;
-    }
-
     if (app->lobby_view == LOBBY_VIEW_JOIN) {
+        OnlineMatch* focus = app_online_get(app, app->lobby_focus_match);
         Rectangle input_box = {card.x + 36.0f, card.y + 88.0f, card.width - 72.0f, 56.0f};
         Rectangle join_btn = {card.x + 36.0f, card.y + 154.0f, card.width - 72.0f, 54.0f};
         Rectangle ready_btn = {card.x + 36.0f, card.y + 218.0f, card.width - 72.0f, 52.0f};
+        Rectangle open_btn = {card.x + 36.0f, card.y + 282.0f, card.width - 72.0f, 52.0f};
         Rectangle mode_btn = {card.x + 36.0f, card.y + card.height - 66.0f, 186.0f, 44.0f};
         Rectangle status_box = {
             card.x + 36.0f,
-            card.y + 280.0f,
+            card.y + 344.0f,
             card.width - 72.0f,
-            mode_btn.y - (card.y + 280.0f) - 8.0f
+            mode_btn.y - (card.y + 344.0f) - 8.0f
         };
 
         gui_draw_text("Join Game", (int)card.x + 36, (int)card.y + 36, 34, palette->text_primary);
@@ -253,85 +355,101 @@ void gui_screen_lobby(struct ChessApp* app) {
         }
         gui_input_box(input_box, app->lobby_input, INVITE_CODE_LEN + 1, app->lobby_input_active);
 
-        if (gui_button(join_btn, app->network.connected ? "Connected" : "Join")) {
-            if (app->network.connected) {
-                snprintf(app->lobby_status, sizeof(app->lobby_status), "Connected to host.");
-            } else if (!matchmaker_is_valid_code(app->lobby_input)) {
+        if (gui_button(join_btn, "Join")) {
+            if (!matchmaker_is_valid_code(app->lobby_input)) {
                 snprintf(app->lobby_status, sizeof(app->lobby_status), "Invite code is invalid.");
             } else {
-                if (network_client_join(&app->network, app->profile.username, app->lobby_input)) {
-                    app->mode = MODE_ONLINE;
-                    app->human_side = SIDE_BLACK;
-                    app->online_match_active = false;
-                    app->online_local_ready = false;
-                    app->online_peer_ready = false;
-                    strncpy(app->online_match_code, app->lobby_input, INVITE_CODE_LEN);
-                    app->online_match_code[INVITE_CODE_LEN] = '\0';
-                    snprintf(app->online_runtime_status,
-                             sizeof(app->online_runtime_status),
-                             "Join request sent.");
+                int idx = app_online_create_join(app, app->online_name, app->lobby_input);
+                if (idx >= 0) {
+                    focus_match(app, idx, LOBBY_VIEW_JOIN);
+                } else {
                     snprintf(app->lobby_status,
                              sizeof(app->lobby_status),
-                             "Waiting for host connection.");
-                } else {
-                    snprintf(app->lobby_status, sizeof(app->lobby_status), "Could not send join request.");
+                             "Could not create join session (limit reached or network error).");
                 }
             }
         }
 
-        if (app->network.connected && !app->online_match_active) {
-            const char* ready_label = app->online_local_ready ? "Ready (On)" : "Ready";
+        if (focus != NULL && focus->connected && !focus->in_game) {
+            const char* ready_label = focus->local_ready ? "Ready (On)" : "Ready";
 
             if (gui_button(ready_btn, ready_label)) {
-                bool next_ready = !app->online_local_ready;
-                if (network_client_send_ready(&app->network, next_ready)) {
-                    app->online_local_ready = next_ready;
+                bool next_ready = !focus->local_ready;
+                if (!app_online_send_ready(app, app->lobby_focus_match, next_ready)) {
+                    snprintf(app->lobby_status, sizeof(app->lobby_status), "Failed to update ready status.");
+                } else {
                     snprintf(app->lobby_status,
                              sizeof(app->lobby_status),
                              next_ready ? "You are Ready. Waiting for host to start."
                                         : "You are not ready.");
-                } else {
-                    snprintf(app->lobby_status,
-                             sizeof(app->lobby_status),
-                             "Failed to update ready status.");
                 }
             }
+        } else {
+            DrawRectangleRounded(ready_btn, 0.20f, 10, Fade(palette->panel, 0.85f));
+            DrawRectangleRoundedLinesEx(ready_btn, 0.20f, 10, 1.0f, palette->panel_border);
+            gui_draw_text("Ready", (int)ready_btn.x + 24, (int)ready_btn.y + 14, 24, palette->text_secondary);
+        }
+
+        if (focus != NULL && focus->in_game && gui_button(open_btn, "Open Match")) {
+            app_online_switch_to_match(app, app->lobby_focus_match, true);
+            return;
+        } else if (focus == NULL || !focus->in_game) {
+            DrawRectangleRounded(open_btn, 0.20f, 10, Fade(palette->panel, 0.85f));
+            DrawRectangleRoundedLinesEx(open_btn, 0.20f, 10, 1.0f, palette->panel_border);
+            gui_draw_text("Open Match", (int)open_btn.x + 24, (int)open_btn.y + 14, 24, palette->text_secondary);
         }
 
         if (gui_button(mode_btn, "Change Mode")) {
-            lobby_return_home(app, app->network.connected);
+            app->lobby_view = LOBBY_VIEW_HOME;
+            app->lobby_focus_match = -1;
             return;
         }
 
-        draw_status_box(status_box, "Status", app->lobby_status);
+        draw_status_box(status_box, "Status", focused_status(app));
         return;
     }
 
     {
-        int members = app->network.connected ? 2 : 1;
-        Rectangle code_box = {card.x + 36.0f, card.y + 78.0f, card.width - 72.0f, 74.0f};
-        Rectangle room_box = {card.x + 36.0f, card.y + 162.0f, card.width - 72.0f, 92.0f};
-        Rectangle start_btn = {card.x + 36.0f, card.y + 264.0f, card.width - 72.0f, 52.0f};
-        Rectangle mode_btn = {card.x + 36.0f, card.y + card.height - 66.0f, 186.0f, 44.0f};
-        Rectangle status_box = {
+        OnlineMatch* focus = app_online_get(app, app->lobby_focus_match);
+        Rectangle code_box;
+        Rectangle room_box;
+        Rectangle ready_btn;
+        Rectangle start_btn;
+        Rectangle mode_btn;
+        Rectangle status_box;
+        Rectangle copy_btn;
+        char members_line[64];
+        char opp_line[96];
+        const char* copy_label = app->lobby_copy_feedback ? "Copied" : "Copy";
+
+        if (focus == NULL) {
+            app->lobby_view = LOBBY_VIEW_HOME;
+            app->lobby_focus_match = -1;
+            return;
+        }
+
+        code_box = (Rectangle){card.x + 36.0f, card.y + 78.0f, card.width - 72.0f, 74.0f};
+        room_box = (Rectangle){card.x + 36.0f, card.y + 162.0f, card.width - 72.0f, 98.0f};
+        ready_btn = (Rectangle){card.x + 36.0f, card.y + 270.0f, card.width - 72.0f, 50.0f};
+        start_btn = (Rectangle){card.x + 36.0f, card.y + 328.0f, card.width - 72.0f, 52.0f};
+        mode_btn = (Rectangle){card.x + 36.0f, card.y + card.height - 66.0f, 186.0f, 44.0f};
+        status_box = (Rectangle){
             card.x + 36.0f,
             start_btn.y + start_btn.height + 10.0f,
             card.width - 72.0f,
             mode_btn.y - (start_btn.y + start_btn.height + 10.0f) - 8.0f
         };
-        Rectangle copy_btn = {code_box.x + code_box.width - 130.0f, code_box.y + 24.0f, 112.0f, 40.0f};
-        char members_line[64];
-        const char* copy_label = app->lobby_copy_feedback ? "Copied" : "Copy";
+        copy_btn = (Rectangle){code_box.x + code_box.width - 130.0f, code_box.y + 24.0f, 112.0f, 40.0f};
 
         gui_draw_text("Host Game", (int)card.x + 36, (int)card.y + 30, 34, palette->text_primary);
 
         DrawRectangleRounded(code_box, 0.10f, 8, Fade(palette->panel, 0.95f));
         DrawRectangleRoundedLinesEx(code_box, 0.10f, 8, 1.0f, palette->panel_border);
         gui_draw_text("Invite Code", (int)code_box.x + 14, (int)code_box.y + 8, 22, palette->text_secondary);
-        gui_draw_text(app->lobby_code, (int)code_box.x + 14, (int)code_box.y + 36, 31, palette->accent);
+        gui_draw_text(focus->invite_code, (int)code_box.x + 14, (int)code_box.y + 36, 31, palette->accent);
 
         if (gui_button(copy_btn, copy_label)) {
-            SetClipboardText(app->lobby_code);
+            SetClipboardText(focus->invite_code);
             app->lobby_copy_feedback = true;
             app->lobby_copy_feedback_timer = 1.6f;
         }
@@ -339,39 +457,48 @@ void gui_screen_lobby(struct ChessApp* app) {
         DrawRectangleRounded(room_box, 0.10f, 8, Fade(palette->panel, 0.95f));
         DrawRectangleRoundedLinesEx(room_box, 0.10f, 8, 1.0f, palette->panel_border);
         gui_draw_text("Room", (int)room_box.x + 14, (int)room_box.y + 8, 24, palette->text_primary);
-        snprintf(members_line, sizeof(members_line), "Players: %d / 2", members);
+        snprintf(members_line, sizeof(members_line), "Players: %d / 2", focus->connected ? 2 : 1);
         gui_draw_text(members_line, (int)room_box.x + 14, (int)room_box.y + 36, 22, palette->text_secondary);
-        gui_draw_text(app->online_peer_ready ? "Opponent: Ready" : "Opponent: Not Ready",
-                      (int)room_box.x + 14,
-                      (int)room_box.y + 62,
-                      22,
-                      app->online_peer_ready ? palette->accent : palette->text_secondary);
+        snprintf(opp_line,
+                 sizeof(opp_line),
+                 "Opponent: %s",
+                 focus->opponent_name[0] != '\0' ? focus->opponent_name : "Waiting...");
+        gui_draw_text(opp_line, (int)room_box.x + 14, (int)room_box.y + 62, 22, palette->text_secondary);
+
+        if (gui_button(ready_btn, focus->local_ready ? "Host Ready (On)" : "Host Ready")) {
+            bool next_ready = !focus->local_ready;
+            if (!app_online_send_ready(app, app->lobby_focus_match, next_ready)) {
+                snprintf(app->lobby_status, sizeof(app->lobby_status), "Failed to update ready status.");
+            } else {
+                snprintf(app->lobby_status,
+                         sizeof(app->lobby_status),
+                         next_ready ? "You are Ready. Waiting for opponent."
+                                    : "You are not ready.");
+            }
+        }
 
         if (gui_button(start_btn, "Start Game")) {
-            if (!app->network.connected) {
+            if (!focus->connected) {
                 snprintf(app->lobby_status, sizeof(app->lobby_status), "Need 2 players in room first.");
-            } else if (!app->online_peer_ready) {
+            } else if (!focus->peer_ready) {
                 snprintf(app->lobby_status, sizeof(app->lobby_status), "Opponent must press Ready first.");
-            } else if (!network_client_send_start(&app->network)) {
+            } else if (!focus->local_ready) {
+                snprintf(app->lobby_status, sizeof(app->lobby_status), "Press Host Ready first.");
+            } else if (!app_online_send_start(app, app->lobby_focus_match)) {
                 snprintf(app->lobby_status, sizeof(app->lobby_status), "Could not send start packet.");
             } else {
-                app->online_match_active = true;
-                app->online_local_ready = false;
-                app->online_peer_ready = false;
-                app->network.invite_code[0] = '\0';
-                app->lobby_code[0] = '\0';
-                app->online_match_code[0] = '\0';
-                snprintf(app->online_runtime_status, sizeof(app->online_runtime_status), "Match started.");
-                app_start_game(app, MODE_ONLINE);
+                app_online_mark_started(app, app->lobby_focus_match);
+                app_online_switch_to_match(app, app->lobby_focus_match, true);
                 return;
             }
         }
 
         if (gui_button(mode_btn, "Change Mode")) {
-            lobby_return_home(app, app->network.connected);
+            app->lobby_view = LOBBY_VIEW_HOME;
+            app->lobby_focus_match = -1;
             return;
         }
 
-        draw_status_box(status_box, "Status", app->lobby_status);
+        draw_status_box(status_box, "Status", focused_status(app));
     }
 }

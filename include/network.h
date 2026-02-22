@@ -27,6 +27,8 @@ typedef struct NetworkClient {
     bool is_host;
     Side host_side;
     char invite_code[INVITE_CODE_LEN + 1];
+    char local_username[PLAYER_NAME_MAX + 1];
+    char peer_username[PLAYER_NAME_MAX + 1];
 } NetworkClient;
 
 /* Socket lifecycle. */

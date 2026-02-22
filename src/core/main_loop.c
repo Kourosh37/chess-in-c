@@ -113,175 +113,255 @@ static void maybe_process_ai_turn(ChessApp* app, AIWorker* worker) {
     }
 }
 
-/* Handles inbound P2P packets and routes them into app state transitions. */
+/* Converts board square index to algebraic coordinate for online snapshot logs. */
+static void square_to_text(int square, char out[3]) {
+    out[0] = (char)('a' + (square & 7));
+    out[1] = (char)('1' + (square >> 3));
+    out[2] = '\0';
+}
+
+/* Appends one move line into per-match online history. */
+static void append_online_move_log(OnlineMatch* match, Side side, Move move) {
+    char from[3];
+    char to[3];
+    char line[64];
+    const char* side_name = (side == SIDE_WHITE) ? "White" : "Black";
+
+    square_to_text(move.from, from);
+    square_to_text(move.to, to);
+
+    if ((move.flags & MOVE_FLAG_PROMOTION) != 0U) {
+        char promo = 'Q';
+        if (move.promotion == PIECE_ROOK) {
+            promo = 'R';
+        } else if (move.promotion == PIECE_BISHOP) {
+            promo = 'B';
+        } else if (move.promotion == PIECE_KNIGHT) {
+            promo = 'N';
+        }
+        snprintf(line, sizeof(line), "%s: %s -> %s=%c", side_name, from, to, promo);
+    } else {
+        snprintf(line, sizeof(line), "%s: %s -> %s", side_name, from, to);
+    }
+
+    if (match->move_log_count >= MOVE_LOG_MAX) {
+        memmove(match->move_log[0], match->move_log[1], (MOVE_LOG_MAX - 1) * sizeof(match->move_log[0]));
+        match->move_log_count = MOVE_LOG_MAX - 1;
+    }
+
+    strncpy(match->move_log[match->move_log_count], line, sizeof(match->move_log[0]) - 1);
+    match->move_log[match->move_log_count][sizeof(match->move_log[0]) - 1] = '\0';
+    match->move_log_count++;
+    match->move_log_scroll = match->move_log_count;
+}
+
+/* Applies one network move to an off-screen match snapshot. */
+static bool apply_move_to_snapshot(OnlineMatch* match, Move move) {
+    Side moving_side;
+    MoveList legal;
+
+    if (match == NULL || !match->used || !match->in_game || match->game_over) {
+        return false;
+    }
+
+    moving_side = match->position.side_to_move;
+    if (!engine_make_move(&match->position, move)) {
+        return false;
+    }
+
+    match->last_move_from = move.from;
+    match->last_move_to = move.to;
+    append_online_move_log(match, moving_side, move);
+
+    generate_legal_moves(&match->position, &legal);
+    match->game_over = (legal.count == 0);
+    if (match->game_over) {
+        match->in_game = false;
+        strncpy(match->status,
+                engine_in_check(&match->position, match->position.side_to_move)
+                    ? "Match ended by checkmate."
+                    : "Match ended by draw.",
+                sizeof(match->status) - 1);
+        match->status[sizeof(match->status) - 1] = '\0';
+    }
+
+    return true;
+}
+
+/* Mirrors selected match metadata into shared app fields used by current UI. */
+static void sync_current_match_runtime(ChessApp* app, int index) {
+    OnlineMatch* match = app_online_get(app, index);
+
+    if (app == NULL ||
+        match == NULL ||
+        app->current_online_match != index ||
+        app->mode != MODE_ONLINE) {
+        return;
+    }
+
+    app->online_match_active = match->in_game;
+    app->online_local_ready = match->local_ready;
+    app->online_peer_ready = match->peer_ready;
+    app->human_side = match->local_side;
+    strncpy(app->online_match_code, match->invite_code, INVITE_CODE_LEN);
+    app->online_match_code[INVITE_CODE_LEN] = '\0';
+    strncpy(app->online_runtime_status, match->status, sizeof(app->online_runtime_status) - 1);
+    app->online_runtime_status[sizeof(app->online_runtime_status) - 1] = '\0';
+}
+
+/* Handles inbound packets for all active online sessions. */
 static void maybe_process_network(ChessApp* app) {
     NetPacket packet;
-    int processed = 0;
 
-    while (processed < MAX_NET_PACKETS_PER_FRAME && network_client_poll(&app->network, &packet)) {
-        processed++;
+    for (int index = 0; index < ONLINE_MATCH_MAX; ++index) {
+        OnlineMatch* match = app_online_get(app, index);
+        int processed = 0;
 
-        if (packet.type == NET_MSG_JOIN_REQUEST) {
-            if (app->network.connected && app->network.is_host) {
-                audio_play(AUDIO_SFX_LOBBY_JOIN);
-                app->mode = MODE_ONLINE;
-                app->human_side = app->network.host_side;
-                app->lobby_view = LOBBY_VIEW_HOST;
-                app->online_local_ready = false;
-                app->online_peer_ready = false;
+        if (match == NULL) {
+            continue;
+        }
 
-                if (app->lobby_code[0] != '\0') {
-                    strncpy(app->online_match_code, app->lobby_code, INVITE_CODE_LEN);
-                    app->online_match_code[INVITE_CODE_LEN] = '\0';
+        while (processed < MAX_NET_PACKETS_PER_FRAME && network_client_poll(&match->network, &packet)) {
+            bool removed = false;
+            processed++;
+            match->connected = match->network.connected;
+
+            if (packet.username[0] != '\0') {
+                strncpy(match->opponent_name, packet.username, PLAYER_NAME_MAX);
+                match->opponent_name[PLAYER_NAME_MAX] = '\0';
+            }
+
+            if (packet.type == NET_MSG_JOIN_REQUEST) {
+                if (match->network.connected && match->network.is_host) {
+                    audio_play(AUDIO_SFX_LOBBY_JOIN);
+                    match->is_host = true;
+                    match->connected = true;
+                    match->local_side = match->network.host_side;
+                    match->local_ready = false;
+                    match->peer_ready = false;
+
+                    if (match->in_game) {
+                        strncpy(match->status, "Opponent reconnected.", sizeof(match->status) - 1);
+                    } else {
+                        strncpy(match->status,
+                                "Player joined room. Waiting for Ready.",
+                                sizeof(match->status) - 1);
+                    }
+                    match->status[sizeof(match->status) - 1] = '\0';
                 }
+            } else if (packet.type == NET_MSG_JOIN_ACCEPT) {
+                if (match->network.connected && !match->network.is_host) {
+                    Side assigned = (packet.flags == SIDE_BLACK) ? SIDE_BLACK : SIDE_WHITE;
 
-                if (app->online_match_active) {
-                    snprintf(app->online_runtime_status,
-                             sizeof(app->online_runtime_status),
-                             "Opponent reconnected.");
-                    snprintf(app->lobby_status,
-                             sizeof(app->lobby_status),
-                             "Opponent reconnected to active match.");
+                    audio_play(AUDIO_SFX_LOBBY_JOIN);
+                    match->is_host = false;
+                    match->connected = true;
+                    match->local_side = assigned;
+                    match->local_ready = false;
+                    match->peer_ready = false;
+
+                    if (packet.invite_code[0] != '\0') {
+                        strncpy(match->invite_code, packet.invite_code, INVITE_CODE_LEN);
+                        match->invite_code[INVITE_CODE_LEN] = '\0';
+                    }
+
+                    if (match->in_game) {
+                        strncpy(match->status, "Reconnected to host.", sizeof(match->status) - 1);
+                    } else {
+                        strncpy(match->status,
+                                "Connected. Press Ready and wait for host.",
+                                sizeof(match->status) - 1);
+                    }
+                    match->status[sizeof(match->status) - 1] = '\0';
+                }
+            } else if (packet.type == NET_MSG_JOIN_REJECT) {
+                strncpy(match->status, "Host rejected the join request.", sizeof(match->status) - 1);
+                match->status[sizeof(match->status) - 1] = '\0';
+            } else if (packet.type == NET_MSG_READY) {
+                if (!match->in_game) {
+                    bool ready = (packet.flags & 1U) != 0U;
+                    match->peer_ready = ready;
+                    if (match->is_host) {
+                        strncpy(match->status,
+                                ready ? "Opponent is Ready. You can start the game."
+                                      : "Opponent is not ready yet.",
+                                sizeof(match->status) - 1);
+                    } else {
+                        strncpy(match->status,
+                                ready ? "Host is ready. Waiting for Start."
+                                      : "Host is not ready.",
+                                sizeof(match->status) - 1);
+                    }
+                    match->status[sizeof(match->status) - 1] = '\0';
+                }
+            } else if (packet.type == NET_MSG_START) {
+                if (match->network.connected && !match->in_game) {
+                    app_online_mark_started(app, index);
+                    match = app_online_get(app, index);
+                    if (match != NULL && (app->lobby_focus_match == index || app->current_online_match == index)) {
+                        app_online_switch_to_match(app, index, true);
+                    }
+                }
+            } else if (packet.type == NET_MSG_MOVE) {
+                if (match->in_game && !match->game_over) {
+                    Move move;
+                    move.from = packet.from;
+                    move.to = packet.to;
+                    move.promotion = packet.promotion;
+                    move.flags = packet.flags;
+                    move.score = 0;
+
+                    if (index == app->current_online_match &&
+                        app->mode == MODE_ONLINE &&
+                        app->screen == SCREEN_PLAY) {
+                        app_apply_move(app, move);
+                        app_online_store_current_match(app);
+                    } else {
+                        apply_move_to_snapshot(match, move);
+                    }
+                }
+            } else if (packet.type == NET_MSG_LEAVE) {
+                if (match->in_game) {
+                    if (index == app->current_online_match &&
+                        app->mode == MODE_ONLINE &&
+                        app->screen == SCREEN_PLAY) {
+                        audio_play(AUDIO_SFX_GAME_OVER);
+                        snprintf(app->online_runtime_status,
+                                 sizeof(app->online_runtime_status),
+                                 "Opponent left the game. Match ended.");
+                        snprintf(app->lobby_status,
+                                 sizeof(app->lobby_status),
+                                 "Your opponent left the game. Match ended.");
+                        app->screen = SCREEN_MENU;
+                    }
+                    app_online_close_match(app, index, false);
+                    removed = true;
+                } else if (match->is_host) {
+                    match->connected = false;
+                    match->network.connected = false;
+                    match->network.peer_addr_len = 0;
+                    match->peer_ready = false;
+                    strncpy(match->opponent_name, "Waiting...", PLAYER_NAME_MAX);
+                    match->opponent_name[PLAYER_NAME_MAX] = '\0';
+                    strncpy(match->status, "Opponent left room.", sizeof(match->status) - 1);
+                    match->status[sizeof(match->status) - 1] = '\0';
                 } else {
-                    snprintf(app->lobby_status,
-                             sizeof(app->lobby_status),
-                             "Player joined room. Waiting for Ready.");
-                    snprintf(app->online_runtime_status,
-                             sizeof(app->online_runtime_status),
-                             "Room has 2 players. Opponent must press Ready.");
+                    if (index == app->current_online_match) {
+                        snprintf(app->lobby_status,
+                                 sizeof(app->lobby_status),
+                                 "Host closed the room.");
+                    }
+                    app_online_close_match(app, index, false);
+                    removed = true;
                 }
             }
-            continue;
-        }
 
-        if (packet.type == NET_MSG_JOIN_ACCEPT) {
-            if (app->network.connected && !app->network.is_host) {
-                Side assigned = (packet.flags == SIDE_BLACK) ? SIDE_BLACK : SIDE_WHITE;
-                audio_play(AUDIO_SFX_LOBBY_JOIN);
-                app->mode = MODE_ONLINE;
-                app->human_side = assigned;
-                app->lobby_view = LOBBY_VIEW_JOIN;
-                app->online_local_ready = false;
-                app->online_peer_ready = false;
-
-                if (packet.invite_code[0] != '\0') {
-                    strncpy(app->online_match_code, packet.invite_code, INVITE_CODE_LEN);
-                    app->online_match_code[INVITE_CODE_LEN] = '\0';
-                } else {
-                    strncpy(app->online_match_code, app->lobby_input, INVITE_CODE_LEN);
-                    app->online_match_code[INVITE_CODE_LEN] = '\0';
-                }
-
-                if (app->mode == MODE_ONLINE && app->online_match_active) {
-                    snprintf(app->online_runtime_status,
-                             sizeof(app->online_runtime_status),
-                             "Reconnected to host.");
-                    snprintf(app->lobby_status,
-                             sizeof(app->lobby_status),
-                             "Reconnected to host.");
-                } else {
-                    snprintf(app->lobby_status,
-                             sizeof(app->lobby_status),
-                             "Connected. Press Ready and wait for host.");
-                    snprintf(app->online_runtime_status,
-                             sizeof(app->online_runtime_status),
-                             "Connected to host. Waiting for Start.");
-                }
-            }
-            continue;
-        }
-
-        if (packet.type == NET_MSG_JOIN_REJECT) {
-            if (app->screen == SCREEN_LOBBY) {
-                snprintf(app->lobby_status, sizeof(app->lobby_status), "Host rejected the join request.");
-            }
-            continue;
-        }
-
-        if (packet.type == NET_MSG_READY) {
-            if (app->mode == MODE_ONLINE && !app->online_match_active) {
-                bool ready = (packet.flags & 1U) != 0U;
-                app->online_peer_ready = ready;
-
-                if (app->network.is_host) {
-                    snprintf(app->lobby_status,
-                             sizeof(app->lobby_status),
-                             ready ? "Opponent is Ready. You can start the game."
-                                   : "Opponent is not ready yet.");
-                } else {
-                    snprintf(app->lobby_status,
-                             sizeof(app->lobby_status),
-                             ready ? "Host is ready. Waiting for Start."
-                                   : "Host is not ready.");
-                }
-            }
-            continue;
-        }
-
-        if (packet.type == NET_MSG_START) {
-            if (app->mode == MODE_ONLINE && app->network.connected && !app->online_match_active) {
-                app->online_match_active = true;
-                app->online_local_ready = false;
-                app->online_peer_ready = false;
-                app->network.invite_code[0] = '\0';
-                app->lobby_code[0] = '\0';
-                app->online_match_code[0] = '\0';
-                snprintf(app->online_runtime_status,
-                         sizeof(app->online_runtime_status),
-                         "Match started.");
-                app_start_game(app, MODE_ONLINE);
-            }
-            continue;
-        }
-
-        if (packet.type == NET_MSG_MOVE) {
-            if (app->mode == MODE_ONLINE && app->online_match_active && !app->game_over) {
-                Move move;
-                move.from = packet.from;
-                move.to = packet.to;
-                move.promotion = packet.promotion;
-                move.flags = packet.flags;
-                move.score = 0;
-
-                app_apply_move(app, move);
-            }
-            continue;
-        }
-
-        if (packet.type == NET_MSG_LEAVE) {
-            if (app->mode == MODE_ONLINE) {
-                app->online_peer_ready = false;
-
-                if (app->online_match_active) {
-                    app_online_end_match(app, false);
-                    app->screen = SCREEN_MENU;
-                    audio_play(AUDIO_SFX_GAME_OVER);
-                    snprintf(app->online_runtime_status,
-                             sizeof(app->online_runtime_status),
-                             "Opponent left the game. Match ended.");
-                    snprintf(app->lobby_status,
-                             sizeof(app->lobby_status),
-                             "Your opponent left the game. Match ended.");
-                } else if (app->network.is_host) {
-                    app->network.connected = false;
-                    snprintf(app->online_runtime_status,
-                             sizeof(app->online_runtime_status),
-                             "Room has 1 player.");
-                    snprintf(app->lobby_status,
-                             sizeof(app->lobby_status),
-                             "Opponent left room.");
-                } else {
-                    app->network.connected = false;
-                    app->online_local_ready = false;
-                    snprintf(app->online_runtime_status,
-                             sizeof(app->online_runtime_status),
-                             "Disconnected from host.");
-                    snprintf(app->lobby_status,
-                             sizeof(app->lobby_status),
-                             "Host closed the room.");
-                }
+            if (removed) {
+                break;
             }
         }
+
+        sync_current_match_runtime(app, index);
     }
 }
 
@@ -338,14 +418,10 @@ int run_main_loop(void) {
         }
     }
 
-    if (app.online_match_active || app.network.connected) {
-        network_client_send_leave(&app.network);
-    }
-
     ai_worker_shutdown(&worker);
     profile_save(&app.profile, "profile.dat");
     app_save_settings(&app);
-    network_client_shutdown(&app.network);
+    app_online_close_all(&app, true);
     audio_shutdown();
     gui_font_shutdown();
 
