@@ -1,5 +1,4 @@
 theme=2
-ai_depth=8
-ai_randomness=0
+ai_difficulty=100
 sound_enabled=1
 sound_volume=1.000

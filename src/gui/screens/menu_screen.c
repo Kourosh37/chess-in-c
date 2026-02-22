@@ -4,6 +4,66 @@
 
 #include "game_state.h"
 
+/* Draws confirmation dialog for app exit action from main menu. */
+static void draw_exit_confirm_dialog(ChessApp* app) {
+    const GuiPalette* palette = gui_palette();
+    float sw = (float)GetScreenWidth();
+    float sh = (float)GetScreenHeight();
+    float panel_w = sw * 0.44f;
+    float panel_h = app->online_match_active ? 228.0f : 196.0f;
+    Rectangle panel;
+    Rectangle cancel_btn;
+    Rectangle exit_btn;
+
+    if (panel_w < 420.0f) {
+        panel_w = 420.0f;
+    }
+    if (panel_w > 620.0f) {
+        panel_w = 620.0f;
+    }
+
+    panel = (Rectangle){
+        sw * 0.5f - panel_w * 0.5f,
+        sh * 0.5f - panel_h * 0.5f,
+        panel_w,
+        panel_h
+    };
+
+    DrawRectangle(0, 0, (int)sw, (int)sh, Fade(BLACK, 0.52f));
+    DrawRectangleRounded(panel, 0.08f, 8, Fade(palette->panel, 0.98f));
+    DrawRectangleRoundedLinesEx(panel, 0.08f, 8, 1.4f, palette->panel_border);
+
+    gui_draw_text("Exit Chess?", (int)panel.x + 20, (int)panel.y + 20, 36, palette->text_primary);
+    gui_draw_text("Are you sure you want to close the game?",
+                  (int)panel.x + 20,
+                  (int)panel.y + 76,
+                  22,
+                  palette->text_secondary);
+
+    if (app->online_match_active) {
+        gui_draw_text("Current online match will be closed and opponent will be notified.",
+                      (int)panel.x + 20,
+                      (int)panel.y + 108,
+                      20,
+                      palette->text_secondary);
+    }
+
+    cancel_btn = (Rectangle){panel.x + 20.0f, panel.y + panel.height - 64.0f, 140.0f, 44.0f};
+    exit_btn = (Rectangle){panel.x + panel.width - 160.0f, panel.y + panel.height - 64.0f, 140.0f, 44.0f};
+
+    if (gui_button(cancel_btn, "Cancel")) {
+        app->exit_confirm_open = false;
+    }
+
+    if (gui_button(exit_btn, "Exit")) {
+        app->exit_confirm_open = false;
+        if (app->online_match_active) {
+            app_online_end_match(app, true);
+        }
+        app->exit_requested = true;
+    }
+}
+
 /* Draws centered title and mode buttons on top-level menu. */
 void gui_screen_menu(struct ChessApp* app) {
     const GuiPalette* palette = gui_palette();
@@ -21,6 +81,7 @@ void gui_screen_menu(struct ChessApp* app) {
     Rectangle settings_btn;
     Rectangle exit_btn;
     bool has_resume = (app->mode == MODE_ONLINE && app->online_match_active);
+    bool input_locked = app->exit_confirm_open;
 
     if (panel_w < 520.0f) {
         panel_w = 520.0f;
@@ -67,42 +128,41 @@ void gui_screen_menu(struct ChessApp* app) {
     settings_btn = (Rectangle){panel.x + 42.0f, panel.y + (has_resume ? 468.0f : 397.0f), panel.width - 84.0f, 58.0f};
     exit_btn = (Rectangle){panel.x + 42.0f, panel.y + (has_resume ? 539.0f : 468.0f), panel.width - 84.0f, 52.0f};
 
-    if (gui_button(single_btn, "Single Player")) {
-        if (app->online_match_active) {
-            app_online_end_match(app, true);
+    if (!input_locked) {
+        if (gui_button(single_btn, "Single Player")) {
+            if (app->online_match_active) {
+                app_online_end_match(app, true);
+            }
+            app->human_side = SIDE_WHITE;
+            app_start_game(app, MODE_SINGLE);
         }
-        app->human_side = SIDE_WHITE;
-        app_start_game(app, MODE_SINGLE);
-    }
 
-    if (gui_button(local_btn, "Local Multiplayer")) {
-        if (app->online_match_active) {
-            app_online_end_match(app, true);
+        if (gui_button(local_btn, "Local Multiplayer")) {
+            if (app->online_match_active) {
+                app_online_end_match(app, true);
+            }
+            app_start_game(app, MODE_LOCAL);
         }
-        app_start_game(app, MODE_LOCAL);
-    }
 
-    if (gui_button(online_btn, "Online")) {
-        app->mode = MODE_ONLINE;
-        app->screen = SCREEN_LOBBY;
-        app->lobby_input[0] = '\0';
-        app->lobby_code[0] = '\0';
-        snprintf(app->lobby_status, sizeof(app->lobby_status), "Host or join with invite code.");
-    }
-
-    if (has_resume && gui_button(resume_btn, "Resume Online Match")) {
-        app->screen = SCREEN_PLAY;
-    }
-
-    if (gui_button(settings_btn, "Settings")) {
-        app->screen = SCREEN_SETTINGS;
-    }
-
-    if (gui_button(exit_btn, "Exit")) {
-        if (app->online_match_active) {
-            app_online_end_match(app, true);
+        if (gui_button(online_btn, "Online")) {
+            app->mode = MODE_ONLINE;
+            app->screen = SCREEN_LOBBY;
+            app->lobby_input[0] = '\0';
+            app->lobby_code[0] = '\0';
+            snprintf(app->lobby_status, sizeof(app->lobby_status), "Host or join with invite code.");
         }
-        app->exit_requested = true;
+
+        if (has_resume && gui_button(resume_btn, "Resume Online Match")) {
+            app->screen = SCREEN_PLAY;
+        }
+
+        if (gui_button(settings_btn, "Settings")) {
+            app->screen = SCREEN_SETTINGS;
+        }
+
+        if (gui_button(exit_btn, "Exit")) {
+            app->exit_confirm_open = true;
+        }
     }
 
     if (has_resume) {
@@ -111,5 +171,9 @@ void gui_screen_menu(struct ChessApp* app) {
                       (int)panel.y + panel.height - 28,
                       18,
                       palette->text_secondary);
+    }
+
+    if (app->exit_confirm_open) {
+        draw_exit_confirm_dialog(app);
     }
 }

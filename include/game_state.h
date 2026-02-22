@@ -28,6 +28,7 @@ typedef struct ChessApp {
     Side human_side;
 
     SearchLimits ai_limits;
+    int ai_difficulty;
     SearchResult last_ai_result;
 
     Profile profile;
@@ -56,6 +57,7 @@ typedef struct ChessApp {
     float move_anim_duration;
 
     bool leave_confirm_open;
+    bool exit_confirm_open;
     bool exit_requested;
 
     char move_log[MOVE_LOG_MAX][64];
@@ -67,6 +69,7 @@ typedef struct ChessApp {
 void app_init(ChessApp* app);
 void app_start_game(ChessApp* app, GameMode mode);
 void app_refresh_legal_moves(ChessApp* app);
+void app_set_ai_difficulty(ChessApp* app, int difficulty_percent);
 
 /* Move flow helpers used by GUI and network event handlers. */
 bool app_apply_move(ChessApp* app, Move move);

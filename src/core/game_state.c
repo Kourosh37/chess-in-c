@@ -11,6 +11,58 @@
 static const char* PROFILE_PATH = "profile.dat";
 static const char* SETTINGS_PATH = "settings.dat";
 
+/* Clamps AI difficulty percentage into safe 0..100 range. */
+static int clamp_difficulty_percent(int value) {
+    if (value < 0) {
+        return 0;
+    }
+    if (value > 100) {
+        return 100;
+    }
+    return value;
+}
+
+/* Maps one user-facing AI difficulty percent into internal search limits. */
+void app_set_ai_difficulty(ChessApp* app, int difficulty_percent) {
+    int difficulty;
+    int depth;
+    int max_time_ms;
+    int randomness;
+
+    if (app == NULL) {
+        return;
+    }
+
+    difficulty = clamp_difficulty_percent(difficulty_percent);
+    app->ai_difficulty = difficulty;
+
+    depth = 1 + ((difficulty * 7 + 50) / 100);
+    if (depth < 1) {
+        depth = 1;
+    }
+    if (depth > 8) {
+        depth = 8;
+    }
+
+    max_time_ms = 300 + difficulty * 20;
+    if (difficulty >= 90) {
+        max_time_ms += 200;
+    }
+
+    randomness = (100 - difficulty + 1) / 2;
+    randomness = (randomness / 5) * 5;
+    if (randomness < 0) {
+        randomness = 0;
+    }
+    if (randomness > 50) {
+        randomness = 50;
+    }
+
+    app->ai_limits.depth = depth;
+    app->ai_limits.max_time_ms = max_time_ms;
+    app->ai_limits.randomness = randomness;
+}
+
 /* Converts board square index to algebraic coordinate (e.g. e4). */
 static void square_to_text(int square, char out[3]) {
     out[0] = (char)('a' + (square & 7));
@@ -57,6 +109,9 @@ static void append_move_log(ChessApp* app, Side side, Move move) {
 static void load_settings(ChessApp* app) {
     FILE* file = fopen(SETTINGS_PATH, "r");
     char line[128];
+    int legacy_depth = -1;
+    int legacy_randomness = -1;
+    bool has_ai_difficulty = false;
 
     if (file == NULL) {
         return;
@@ -72,6 +127,10 @@ static void load_settings(ChessApp* app) {
                 value = THEME_OCEAN;
             }
             app->theme = (ColorTheme)value;
+        } else if (strncmp(line, "ai_difficulty=", 14) == 0) {
+            int difficulty = atoi(line + 14);
+            app_set_ai_difficulty(app, difficulty);
+            has_ai_difficulty = true;
         } else if (strncmp(line, "ai_depth=", 9) == 0) {
             int depth = atoi(line + 9);
             if (depth < 1) {
@@ -80,7 +139,7 @@ static void load_settings(ChessApp* app) {
             if (depth > 8) {
                 depth = 8;
             }
-            app->ai_limits.depth = depth;
+            legacy_depth = depth;
         } else if (strncmp(line, "ai_randomness=", 14) == 0) {
             int randomness = atoi(line + 14);
             if (randomness < 0) {
@@ -89,7 +148,7 @@ static void load_settings(ChessApp* app) {
             if (randomness > 100) {
                 randomness = 100;
             }
-            app->ai_limits.randomness = (randomness / 10) * 10;
+            legacy_randomness = randomness;
         } else if (strncmp(line, "sound_enabled=", 14) == 0) {
             int enabled = atoi(line + 14);
             app->sound_enabled = (enabled != 0);
@@ -106,6 +165,32 @@ static void load_settings(ChessApp* app) {
     }
 
     fclose(file);
+
+    if (!has_ai_difficulty && (legacy_depth >= 0 || legacy_randomness >= 0)) {
+        int depth_percent;
+        int consistency_percent;
+        int blended;
+        int clamped_depth = (legacy_depth >= 0) ? legacy_depth : app->ai_limits.depth;
+        int clamped_randomness = (legacy_randomness >= 0) ? legacy_randomness : app->ai_limits.randomness;
+
+        if (clamped_depth < 1) {
+            clamped_depth = 1;
+        }
+        if (clamped_depth > 8) {
+            clamped_depth = 8;
+        }
+        if (clamped_randomness < 0) {
+            clamped_randomness = 0;
+        }
+        if (clamped_randomness > 100) {
+            clamped_randomness = 100;
+        }
+
+        depth_percent = ((clamped_depth - 1) * 100 + 3) / 7;
+        consistency_percent = 100 - clamped_randomness;
+        blended = (depth_percent * 65 + consistency_percent * 35 + 50) / 100;
+        app_set_ai_difficulty(app, blended);
+    }
 }
 
 /* Initializes a profile object with safe defaults. */
@@ -135,9 +220,8 @@ void app_init(ChessApp* app) {
     app->theme = THEME_CLASSIC;
 
     app->human_side = SIDE_WHITE;
-    app->ai_limits.depth = 4;
-    app->ai_limits.max_time_ms = 1500;
-    app->ai_limits.randomness = 0;
+    app->ai_difficulty = 60;
+    app_set_ai_difficulty(app, app->ai_difficulty);
     app->sound_enabled = true;
     app->sound_volume = 1.0f;
 
@@ -163,6 +247,7 @@ void app_init(ChessApp* app) {
     app->online_match_code[0] = '\0';
     app->online_match_active = false;
     app->leave_confirm_open = false;
+    app->exit_confirm_open = false;
     snprintf(app->online_runtime_status,
              sizeof(app->online_runtime_status),
              "No active online match.");
@@ -187,6 +272,7 @@ void app_start_game(ChessApp* app, GameMode mode) {
     app->last_move_from = -1;
     app->last_move_to = -1;
     app->leave_confirm_open = false;
+    app->exit_confirm_open = false;
     app->move_log_count = 0;
     app->move_log_scroll = 0;
 
@@ -344,8 +430,7 @@ bool app_save_settings(const ChessApp* app) {
     }
 
     fprintf(file, "theme=%d\n", (int)app->theme);
-    fprintf(file, "ai_depth=%d\n", app->ai_limits.depth);
-    fprintf(file, "ai_randomness=%d\n", app->ai_limits.randomness);
+    fprintf(file, "ai_difficulty=%d\n", app->ai_difficulty);
     fprintf(file, "sound_enabled=%d\n", app->sound_enabled ? 1 : 0);
     fprintf(file, "sound_volume=%.3f\n", app->sound_volume);
 

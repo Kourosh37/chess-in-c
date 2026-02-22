@@ -1,6 +1,7 @@
 #include "gui.h"
 
 #include <stdio.h>
+#include <string.h>
 
 #include "game_state.h"
 
@@ -23,6 +24,52 @@ static bool square_has_turn_piece(const ChessApp* app, int square) {
 /* Converts side enum value to text label. */
 static const char* side_to_text(Side side) {
     return (side == SIDE_WHITE) ? "White" : "Black";
+}
+
+/* Draws single-line text clipped with ellipsis to prevent panel overlap. */
+static void draw_text_fit(const char* text,
+                          int x,
+                          int y,
+                          int font_size,
+                          int max_width,
+                          Color color) {
+    char buffer[192];
+    size_t len;
+    int ellipsis_w;
+
+    if (text == NULL || max_width <= 0) {
+        return;
+    }
+
+    if (gui_measure_text(text, font_size) <= max_width) {
+        gui_draw_text(text, x, y, font_size, color);
+        return;
+    }
+
+    ellipsis_w = gui_measure_text("...", font_size);
+    if (ellipsis_w >= max_width) {
+        return;
+    }
+
+    strncpy(buffer, text, sizeof(buffer) - 1);
+    buffer[sizeof(buffer) - 1] = '\0';
+    len = strlen(buffer);
+
+    while (len > 0) {
+        buffer[len] = '\0';
+        if (gui_measure_text(buffer, font_size) + ellipsis_w <= max_width) {
+            break;
+        }
+        len--;
+    }
+
+    if (len == 0) {
+        return;
+    }
+
+    buffer[len] = '\0';
+    strncat(buffer, "...", sizeof(buffer) - strlen(buffer) - 1);
+    gui_draw_text(buffer, x, y, font_size, color);
 }
 
 /* Finds the legal move matching UI selection state. */
@@ -249,45 +296,57 @@ void gui_screen_play(struct ChessApp* app) {
 
     {
         int y = (int)middle.y + 14;
+        int content_x = (int)middle.x + 12;
+        int content_w = (int)middle.width - 24;
+        int title_size = (middle.height < 210.0f) ? 22 : 24;
+        int line_size = (middle.height < 210.0f) ? 19 : 21;
+        int sub_size = (middle.height < 210.0f) ? 18 : 20;
+        int status_size = (middle.height < 210.0f) ? 20 : 22;
+        int tiny_size = (middle.height < 210.0f) ? 16 : 18;
+        int info_limit_y = (int)(middle.y + middle.height * 0.58f);
+        int info_end_y;
         char line[128];
 
         snprintf(line, sizeof(line), "Turn: %s", side_to_text(app->position.side_to_move));
-        gui_draw_text(line, (int)middle.x + 12, y, 24, palette->text_primary);
-        y += 34;
+        draw_text_fit(line, content_x, y, title_size, content_w, palette->text_primary);
+        y += title_size + 10;
 
         if (app->mode == MODE_SINGLE) {
-            gui_draw_text("Mode: Single Player", (int)middle.x + 12, y, 21, palette->text_secondary);
+            draw_text_fit("Mode: Single Player", content_x, y, line_size, content_w, palette->text_secondary);
         } else if (app->mode == MODE_LOCAL) {
-            gui_draw_text("Mode: Local Multiplayer", (int)middle.x + 12, y, 21, palette->text_secondary);
+            draw_text_fit("Mode: Local Multiplayer", content_x, y, line_size, content_w, palette->text_secondary);
         } else {
-            gui_draw_text("Mode: Online", (int)middle.x + 12, y, 21, palette->text_secondary);
+            draw_text_fit("Mode: Online", content_x, y, line_size, content_w, palette->text_secondary);
         }
-        y += 32;
+        y += line_size + 9;
 
         if (app->mode == MODE_ONLINE) {
-            gui_draw_text(app->online_runtime_status, (int)middle.x + 12, y, 20, palette->text_secondary);
-            y += 30;
+            draw_text_fit(app->online_runtime_status, content_x, y, sub_size, content_w, palette->text_secondary);
+            y += sub_size + 8;
         } else if (app->mode == MODE_SINGLE) {
             char ai_line[96];
-            snprintf(ai_line, sizeof(ai_line), "AI: depth %d  randomness %d",
-                     app->ai_limits.depth,
-                     app->ai_limits.randomness);
-            gui_draw_text(ai_line, (int)middle.x + 12, y, 20, palette->text_secondary);
-            y += 30;
+            snprintf(ai_line, sizeof(ai_line), "AI Difficulty: %d%%", app->ai_difficulty);
+            draw_text_fit(ai_line, content_x, y, sub_size, content_w, palette->text_secondary);
+            y += sub_size + 8;
         }
 
         if (app->mode == MODE_SINGLE && app->ai_thinking) {
-            gui_draw_text("AI is thinking...", (int)middle.x + 12, y, 22, palette->accent);
-            y += 32;
+            draw_text_fit("AI is thinking...", content_x, y, status_size, content_w, palette->accent);
+            y += status_size + 8;
         } else if (app->mode == MODE_ONLINE && app->online_match_active && app->network.connected && !app_is_human_turn(app)) {
-            gui_draw_text("Waiting for opponent...", (int)middle.x + 12, y, 22, palette->accent);
-            y += 32;
+            draw_text_fit("Waiting for opponent...", content_x, y, status_size, content_w, palette->accent);
+            y += status_size + 8;
         } else if (app->mode == MODE_ONLINE && !app->network.connected) {
-            gui_draw_text("Opponent disconnected.", (int)middle.x + 12, y, 22, (Color){176, 78, 29, 255});
-            y += 32;
+            draw_text_fit("Opponent disconnected.",
+                          content_x,
+                          y,
+                          status_size,
+                          content_w,
+                          (Color){176, 78, 29, 255});
+            y += status_size + 8;
         }
 
-        if (app->mode == MODE_SINGLE && app->last_ai_result.depth_reached > 0) {
+        if (app->mode == MODE_SINGLE && app->last_ai_result.depth_reached > 0 && y + tiny_size + 8 < info_limit_y) {
             char info[128];
             snprintf(info,
                      sizeof(info),
@@ -295,32 +354,52 @@ void gui_screen_play(struct ChessApp* app) {
                      app->last_ai_result.depth_reached,
                      app->last_ai_result.score,
                      (unsigned long long)app->last_ai_result.nodes);
-            gui_draw_text(info, (int)middle.x + 12, y, 18, palette->text_secondary);
-            y += 28;
+            draw_text_fit(info, content_x, y, tiny_size, content_w, palette->text_secondary);
+            y += tiny_size + 8;
         }
 
-        if (app->game_over) {
+        if (app->game_over && y + status_size + 10 < info_limit_y) {
             Side loser = app->position.side_to_move;
             bool mate = engine_in_check(&app->position, loser);
 
             if (mate) {
                 Side winner = (loser == SIDE_WHITE) ? SIDE_BLACK : SIDE_WHITE;
                 snprintf(line, sizeof(line), "Checkmate! %s wins.", side_to_text(winner));
-                gui_draw_text(line, (int)middle.x + 12, y + 6, 25, (Color){184, 36, 42, 255});
+                draw_text_fit(line, content_x, y + 4, status_size, content_w, (Color){184, 36, 42, 255});
             } else {
-                gui_draw_text("Draw (stalemate).", (int)middle.x + 12, y + 6, 25, palette->text_primary);
+                draw_text_fit("Draw (stalemate).", content_x, y + 4, status_size, content_w, palette->text_primary);
             }
         }
-    }
 
-    {
-        Rectangle log_panel = {
-            middle.x + 10.0f,
-            middle.y + middle.height * 0.44f,
-            middle.width - 20.0f,
-            middle.height * 0.53f
-        };
-        draw_move_log_panel(app, log_panel);
+        info_end_y = y;
+
+        {
+            float min_log_h = middle.height * 0.36f;
+            float log_y = (float)info_end_y + 8.0f;
+            float max_log_y;
+            Rectangle log_panel;
+
+            if (min_log_h < 96.0f) {
+                min_log_h = 96.0f;
+            }
+
+            max_log_y = middle.y + middle.height - min_log_h - 8.0f;
+            if (log_y > max_log_y) {
+                log_y = max_log_y;
+            }
+
+            if (log_y < middle.y + middle.height * 0.40f) {
+                log_y = middle.y + middle.height * 0.40f;
+            }
+
+            log_panel = (Rectangle){
+                middle.x + 10.0f,
+                log_y,
+                middle.width - 20.0f,
+                middle.y + middle.height - log_y - 8.0f
+            };
+            draw_move_log_panel(app, log_panel);
+        }
     }
 
     if (app->leave_confirm_open) {

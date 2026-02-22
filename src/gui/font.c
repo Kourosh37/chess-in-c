@@ -41,9 +41,21 @@ bool gui_font_init(void) {
     g_ui_font_initialized = true;
 
     if (!try_load_font_path("assets/fonts/ui_font.ttf")) {
-        if (!try_load_font_path("assets/fonts/NotoSans-Regular.ttf")) {
-            if (!try_load_font_path("C:/Windows/Fonts/segoeui.ttf")) {
-                try_load_font_path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf");
+        if (!try_load_font_path("assets/fonts/Cinzel-Bold.ttf")) {
+            if (!try_load_font_path("assets/fonts/PlayfairDisplay-Bold.ttf")) {
+                if (!try_load_font_path("C:/Windows/Fonts/cambriab.ttf")) {
+                    if (!try_load_font_path("C:/Windows/Fonts/georgiab.ttf")) {
+                        if (!try_load_font_path("C:/Windows/Fonts/timesbd.ttf")) {
+                            if (!try_load_font_path("C:/Windows/Fonts/segoeuib.ttf")) {
+                                if (!try_load_font_path("/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf")) {
+                                    if (!try_load_font_path("assets/fonts/NotoSans-Regular.ttf")) {
+                                        try_load_font_path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf");
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }

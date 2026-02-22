@@ -562,12 +562,52 @@ static void draw_piece_shape(PieceType piece, Side side, Vector2 center, float s
     }
 }
 
-/* Draws one framed coordinate badge centered text. */
-static void draw_coordinate_badge(Rectangle rect, const char* text, const GuiPalette* palette) {
-    int font_size = (int)(rect.height * 0.62f);
-    int text_w;
-    int text_x;
-    int text_y;
+/* Returns outer coordinate frame rect and writes side-band thickness. */
+static Rectangle coordinate_frame_rect(const GuiPlayLayout* layout, float* out_band) {
+    float band = layout->square_size * 0.32f;
+
+    if (band < 18.0f) {
+        band = 18.0f;
+    }
+    if (band > 26.0f) {
+        band = 26.0f;
+    }
+
+    if (out_band != NULL) {
+        *out_band = band;
+    }
+
+    return (Rectangle){
+        layout->board.x - band,
+        layout->board.y - band,
+        layout->board.width + band * 2.0f,
+        layout->board.height + band * 2.0f
+    };
+}
+
+/* Draws one shared frame around board + coordinates. */
+static void draw_coordinate_frame(const GuiPlayLayout* layout) {
+    const GuiPalette* palette = gui_palette();
+    Rectangle frame = coordinate_frame_rect(layout, NULL);
+    Rectangle inner = {frame.x + 3.0f, frame.y + 3.0f, frame.width - 6.0f, frame.height - 6.0f};
+
+    DrawRectangleRounded((Rectangle){frame.x + 3.0f, frame.y + 4.0f, frame.width, frame.height},
+                         0.06f,
+                         8,
+                         with_alpha(BLACK, 0.12f));
+    DrawRectangleRounded(frame, 0.06f, 8, with_alpha(palette->panel, 0.90f));
+    DrawRectangleRoundedLinesEx(frame, 0.06f, 8, 2.0f, with_alpha(palette->board_outline, 0.95f));
+    DrawRectangleRoundedLinesEx(inner, 0.06f, 8, 1.0f, with_alpha(palette->accent, 0.38f));
+}
+
+/* Draws board coordinates within outer frame bands (no per-cell badges). */
+static void draw_coordinates(const GuiPlayLayout* layout) {
+    const GuiPalette* palette = gui_palette();
+    float band;
+    Rectangle frame = coordinate_frame_rect(layout, &band);
+    int font_size = (int)(band * 0.62f);
+    int top_y;
+    int bottom_y;
 
     if (font_size < 16) {
         font_size = 16;
@@ -576,87 +616,29 @@ static void draw_coordinate_badge(Rectangle rect, const char* text, const GuiPal
         font_size = 24;
     }
 
-    DrawRectangleRounded((Rectangle){rect.x + 1.5f, rect.y + 2.0f, rect.width, rect.height},
-                         0.32f,
-                         8,
-                         with_alpha(BLACK, 0.13f));
-    DrawRectangleRounded(rect, 0.32f, 8, with_alpha(palette->panel, 0.96f));
-    DrawRectangleRoundedLinesEx(rect, 0.32f, 8, 1.0f, with_alpha(palette->panel_border, 0.95f));
-
-    text_w = gui_measure_text(text, font_size);
-    text_x = (int)(rect.x + (rect.width - (float)text_w) * 0.5f);
-    text_y = (int)(rect.y + (rect.height - (float)font_size) * 0.5f - 1.0f);
-    gui_draw_text(text, text_x, text_y, font_size, palette->text_primary);
-}
-
-/* Draws framed board coordinates on all four board edges. */
-static void draw_coordinates(const GuiPlayLayout* layout) {
-    const GuiPalette* palette = gui_palette();
-    float gap = layout->square_size * 0.09f;
-    float file_w = layout->square_size * 0.40f;
-    float file_h = layout->square_size * 0.30f;
-    float rank_w;
-    float rank_h;
-
-    if (gap < 5.0f) {
-        gap = 5.0f;
-    }
-
-    if (file_w < 26.0f) {
-        file_w = 26.0f;
-    }
-    if (file_w > 38.0f) {
-        file_w = 38.0f;
-    }
-
-    if (file_h < 22.0f) {
-        file_h = 22.0f;
-    }
-    if (file_h > 30.0f) {
-        file_h = 30.0f;
-    }
-
-    rank_w = file_h + 2.0f;
-    rank_h = file_h;
+    top_y = (int)(frame.y + (band - (float)font_size) * 0.5f - 1.0f);
+    bottom_y = (int)(frame.y + frame.height - band + (band - (float)font_size) * 0.5f - 1.0f);
 
     for (int file = 0; file < 8; ++file) {
         char text[2] = {(char)('a' + file), '\0'};
         float cx = layout->board.x + ((float)file + 0.5f) * layout->square_size;
-        Rectangle top = {
-            cx - file_w * 0.5f,
-            layout->board.y - gap - file_h,
-            file_w,
-            file_h
-        };
-        Rectangle bottom = {
-            cx - file_w * 0.5f,
-            layout->board.y + layout->board.height + gap,
-            file_w,
-            file_h
-        };
+        int text_w = gui_measure_text(text, font_size);
+        int x = (int)(cx - (float)text_w * 0.5f);
 
-        draw_coordinate_badge(top, text, palette);
-        draw_coordinate_badge(bottom, text, palette);
+        gui_draw_text(text, x, top_y, font_size, palette->text_primary);
+        gui_draw_text(text, x, bottom_y, font_size, palette->text_primary);
     }
 
     for (int row = 0; row < 8; ++row) {
         char text[2] = {(char)('8' - row), '\0'};
         float cy = layout->board.y + ((float)row + 0.5f) * layout->square_size;
-        Rectangle left = {
-            layout->board.x - gap - rank_w,
-            cy - rank_h * 0.5f,
-            rank_w,
-            rank_h
-        };
-        Rectangle right = {
-            layout->board.x + layout->board.width + gap,
-            cy - rank_h * 0.5f,
-            rank_w,
-            rank_h
-        };
+        int text_w = gui_measure_text(text, font_size);
+        int y = (int)(cy - (float)font_size * 0.5f - 1.0f);
+        int left_x = (int)(frame.x + (band - (float)text_w) * 0.5f);
+        int right_x = (int)(frame.x + frame.width - band + (band - (float)text_w) * 0.5f);
 
-        draw_coordinate_badge(left, text, palette);
-        draw_coordinate_badge(right, text, palette);
+        gui_draw_text(text, left_x, y, font_size, palette->text_primary);
+        gui_draw_text(text, right_x, y, font_size, palette->text_primary);
     }
 }
 
@@ -832,6 +814,7 @@ void gui_draw_board(const ChessApp* app) {
     float piece_size = layout.square_size * 0.88f;
 
     draw_card(info_card, with_alpha(palette->panel, 0.92f), palette->panel_border);
+    draw_coordinate_frame(&layout);
 
     for (int rank = 7; rank >= 0; --rank) {
         for (int file = 0; file < 8; ++file) {
