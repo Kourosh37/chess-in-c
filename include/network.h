@@ -2,9 +2,11 @@
 #define NETWORK_H
 
 /*
- * TCP relay-based network API.
- * Both host and guest connect to one relay server and exchange game packets
- * through that server, so they do not need to share the same LAN.
+ * Direct peer-to-peer TCP network API.
+ * Host opens a socket and shares an invite code (public IPv4 + port);
+ * guest connects directly using that code. No standalone relay process is
+ * required from end users. Each runtime may keep a lightweight listener open
+ * for reconnect/resume flow.
  */
 
 #include <stdbool.h>
@@ -19,8 +21,10 @@ extern "C" {
 /* Runtime socket and peer tracking state. */
 typedef struct NetworkClient {
     intptr_t socket_handle;
+    intptr_t listen_socket_handle;
     uint32_t sequence;
     bool initialized;
+    /* Legacy field name kept for compatibility: true means transport is ready. */
     bool relay_connected;
     bool connected;
     bool is_host;

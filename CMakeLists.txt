@@ -11,6 +11,7 @@ set(CMAKE_C_EXTENSIONS OFF)
 
 option(CHESS_FETCH_RAYLIB "Fetch raylib automatically when not installed" ON)
 option(CHESS_ENABLE_WARNINGS "Enable common warning flags" ON)
+option(CHESS_BUILD_LEGACY_RELAY_SERVER "Build legacy standalone relay server binary" OFF)
 
 find_package(Threads REQUIRED)
 
@@ -77,13 +78,15 @@ if(WIN32)
 endif()
 
 # ------------------------------------------------------------
-# Optional relay server executable (TCP room relay)
+# Optional legacy relay server executable (disabled by default)
 # ------------------------------------------------------------
-add_executable(chess_relay_server
-    src/network/relay_server.c
-    src/network/matchmaker.c
-)
-target_include_directories(chess_relay_server PRIVATE include src/network)
-if(WIN32)
-    target_link_libraries(chess_relay_server PRIVATE ws2_32)
+if(CHESS_BUILD_LEGACY_RELAY_SERVER)
+    add_executable(chess_relay_server
+        src/network/relay_server.c
+        src/network/matchmaker.c
+    )
+    target_include_directories(chess_relay_server PRIVATE include src/network)
+    if(WIN32)
+        target_link_libraries(chess_relay_server PRIVATE ws2_32)
+    endif()
 endif()

@@ -735,7 +735,7 @@ bool app_online_switch_to_match(ChessApp* app, int index, bool open_play_screen)
     return true;
 }
 
-/* Reconnects one persisted/disconnected online match slot to relay server. */
+/* Reconnects one persisted/disconnected online match slot to direct P2P room. */
 bool app_online_reconnect_match(ChessApp* app, int index) {
     OnlineMatch* match;
 
@@ -760,6 +760,7 @@ bool app_online_reconnect_match(ChessApp* app, int index) {
             network_client_shutdown(&match->network);
             return false;
         }
+        match->network.host_side = match->local_side;
         match->connected = false;
         strncpy(match->status,
                 "Reconnected as host. Waiting for opponent.",
@@ -901,6 +902,9 @@ bool app_online_attach_reconnect_client(ChessApp* app,
 
     take_network_client(&match->network, client);
     match->is_host = is_host_reconnect;
+    if (is_host_reconnect) {
+        match->network.host_side = match->local_side;
+    }
 
     if (is_host_reconnect) {
         match->connected = false;

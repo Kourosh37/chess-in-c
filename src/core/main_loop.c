@@ -82,7 +82,7 @@ static void ai_worker_shutdown(AIWorker* worker) {
     }
 }
 
-/* Background worker for online relay checks/handshakes without UI stalls. */
+/* Background worker for online connectivity checks/handshakes without UI stalls. */
 typedef struct OnlineWorker {
     OnlineAsyncAction action;
     int match_index;
@@ -132,11 +132,11 @@ static void* online_worker_thread(void* data) {
     if (worker->action == ONLINE_ASYNC_ENTER_LOBBY) {
         ok = network_relay_probe();
         if (!ok) {
-            online_worker_set_error(worker, "Online relay is not reachable.");
+            online_worker_set_error(worker, "Internet connection is not reachable.");
         }
     } else if (worker->action == ONLINE_ASYNC_HOST_ROOM) {
         if (!network_relay_probe()) {
-            online_worker_set_error(worker, "Online relay is not reachable.");
+            online_worker_set_error(worker, "Internet connection is not reachable.");
         } else if (!network_client_init(&worker->client, 0)) {
             online_worker_set_error(worker, "Could not initialize network client.");
         } else if (!network_client_host(&worker->client, worker->username, worker->out_invite_code)) {
@@ -148,7 +148,7 @@ static void* online_worker_thread(void* data) {
         }
     } else if (worker->action == ONLINE_ASYNC_JOIN_ROOM) {
         if (!network_relay_probe()) {
-            online_worker_set_error(worker, "Online relay is not reachable.");
+            online_worker_set_error(worker, "Internet connection is not reachable.");
         } else if (!network_client_init(&worker->client, 0)) {
             online_worker_set_error(worker, "Could not initialize network client.");
         } else if (!network_client_join(&worker->client, worker->username, worker->invite_code)) {
@@ -162,7 +162,7 @@ static void* online_worker_thread(void* data) {
         }
     } else if (worker->action == ONLINE_ASYNC_RECONNECT_ROOM) {
         if (!network_relay_probe()) {
-            online_worker_set_error(worker, "Online relay is not reachable.");
+            online_worker_set_error(worker, "Internet connection is not reachable.");
         } else if (!network_client_init(&worker->client, 0)) {
             online_worker_set_error(worker, "Could not initialize network client.");
         } else if (worker->reconnect_is_host) {
@@ -329,7 +329,7 @@ static void maybe_process_online_actions(ChessApp* app, OnlineWorker* worker) {
     }
 
     if (!worker->success) {
-        const char* title = (worker->action == ONLINE_ASYNC_ENTER_LOBBY) ? "Offline" : "Relay Error";
+        const char* title = (worker->action == ONLINE_ASYNC_ENTER_LOBBY) ? "Offline" : "Online Error";
         app_show_network_error(app, title, worker->error);
         clear_online_loading(app);
         return;

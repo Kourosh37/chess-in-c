@@ -1,6 +1,6 @@
-# ChessProject
+# Chess
 
-A modular chess application written in pure C11, with a bitboard engine, Raylib GUI, and direct UDP peer-to-peer online play.
+A modular chess application written in pure C11, with a bitboard engine, Raylib GUI, and direct TCP peer-to-peer online play.
 
 This repository targets a practical baseline that is easy to build, easy to extend, and clear in architecture.
 
@@ -25,13 +25,13 @@ This repository targets a practical baseline that is easy to build, easy to exte
 
 ## Overview
 
-`ChessProject` provides:
+`Chess` provides:
 
 - A legal move chess engine based on bitboards.
 - A searchable AI opponent using negamax plus alpha-beta pruning.
 - A threaded main loop so AI search does not freeze rendering.
 - A Raylib desktop GUI with menu, play, and lobby screens.
-- Direct host/join online mode over UDP invite codes.
+- Direct host/join online mode over TCP invite codes.
 - Local profile persistence (`username`, `wins`, `losses`).
 
 The codebase is organized into explicit modules (`engine`, `core`, `gui`, `network`, `data`) with shared types in `include/`.
@@ -60,7 +60,7 @@ The codebase is organized into explicit modules (`engine`, `core`, `gui`, `netwo
 
 ### Online
 
-- One host and one guest over UDP.
+- One host and one guest over direct TCP.
 - Invite code encodes host endpoint (`IPv4 + port`).
 - Move packets validated through normal engine move legality.
 
@@ -69,7 +69,7 @@ The codebase is organized into explicit modules (`engine`, `core`, `gui`, `netwo
 - `src/engine/`: bitboards, attacks, move generation, move application, evaluation, search.
 - `src/core/`: app state, mode transitions, AI worker thread, main loop orchestration.
 - `src/gui/`: Raylib rendering, widgets, input handling, screen controllers.
-- `src/network/`: UDP socket client, packet protocol, invite code encode/decode.
+- `src/network/`: TCP socket client, packet protocol, invite code encode/decode.
 - `src/data/`: local profile load/save and result updates.
 - `include/`: shared API headers and public types for all modules.
 
@@ -169,8 +169,7 @@ cmake -S . -B build -G Ninja -DCHESS_FETCH_RAYLIB=OFF -DCHESS_ENABLE_WARNINGS=ON
 - `Single Player`: human vs AI.
 - `Local 2 Player`: two humans on one machine.
 - `Online (P2P)`: open host/join lobby.
-- AI `Depth`: adjustable in menu, effective range `1..8`.
-- AI `Randomness`: `0..100` in steps of 10.
+- AI `Difficulty`: one 0..100 setting mapped internally to depth/time/randomness.
 
 ### Play Screen
 
@@ -186,8 +185,8 @@ cmake -S . -B build -G Ninja -DCHESS_FETCH_RAYLIB=OFF -DCHESS_ENABLE_WARNINGS=ON
 
 ## Networking Model
 
-- Protocol: compact packed UDP packet (`NetPacket`).
-- Topology: direct P2P, one host and one guest, no standalone server binary.
+- Protocol: compact packed TCP packet (`NetPacket`).
+- Topology: direct P2P, one host and one guest, no standalone server binary required for players.
 - Invite code is fixed-length (`10` chars), uses a Base32 alphabet without ambiguous symbols, and encodes `IPv4 + port` (48-bit payload).
 
 Connection flow:
@@ -199,8 +198,8 @@ Connection flow:
 
 Important:
 
-- Best experience is on LAN.
-- Public internet play usually requires NAT traversal strategy or manual port forwarding.
+- Public internet play works when host endpoint is reachable (open/NAT-mapped port).
+- Strict NAT/CGNAT networks may still block direct P2P without external relay/STUN/TURN.
 - No encryption/authentication is implemented in the baseline.
 
 ## Engine Details
@@ -256,8 +255,8 @@ Profile is loaded at startup, updated after single-player checkmates, and saved 
 
 ### Online Robustness
 
-- UDP transport has no retransmission, heartbeat, reconnect, or rollback logic.
-- Sequence numbers are present but not used for advanced reliability semantics.
+- Direct TCP P2P still depends on endpoint reachability (NAT/firewall rules).
+- Session recovery is supported at app level, but no external NAT traversal service is bundled.
 
 ### UX
 
@@ -282,9 +281,10 @@ cmake -S . -B build -G Ninja
 
 - If `CHESS_FETCH_RAYLIB=OFF`, install Raylib for your platform or turn fetch back on.
 
-### Online Mode Cannot Connect Outside LAN
+### Online Mode Cannot Connect Over Internet
 
-- Verify host port reachability and router/NAT forwarding.
+- Verify host port reachability and router/NAT behavior.
+- Some ISPs use CGNAT, which can block inbound P2P connections.
 
 ## Development Notes
 

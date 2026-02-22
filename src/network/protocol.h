@@ -2,7 +2,7 @@
 #define PROTOCOL_H
 
 /*
- * Compact wire protocol used by the TCP relay transport.
+ * Compact wire protocol used by direct TCP peer transport.
  * Payload intentionally stays minimal (mostly move coordinates + metadata).
  */
 
@@ -28,7 +28,7 @@ typedef enum NetMsgType {
     NET_MSG_RELAY_HOST_ACK = 14
 } NetMsgType;
 
-/* Packed message for direct UDP transfer. */
+/* Packed message for direct TCP transfer. */
 #pragma pack(push, 1)
 typedef struct NetPacket {
     uint8_t type;
