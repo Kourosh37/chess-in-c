@@ -83,6 +83,165 @@ static bool draw_slider_row(const char* label,
     return gui_slider_float(slider, value, min_value, max_value);
 }
 
+static int g_missing_audio_scroll = 0;
+static bool g_missing_audio_thumb_dragging = false;
+static float g_missing_audio_thumb_drag_offset = 0.0f;
+
+/* Draws scrollable panel with missing audio filenames. */
+static void draw_missing_audio_panel(Rectangle panel, const char* const* entries, int entry_count) {
+    const GuiPalette* palette = gui_palette();
+    Vector2 mouse = GetMousePosition();
+    Rectangle content;
+    int line_h = 21;
+    int visible;
+    int max_start;
+    int start;
+    bool has_scrollbar = false;
+    bool hovered;
+    Rectangle track = {0};
+    Rectangle thumb = {0};
+    float track_h = 0.0f;
+    float thumb_h = 0.0f;
+    float t = 0.0f;
+    int text_w;
+
+    DrawRectangleRounded(panel, 0.09f, 8, Fade(palette->panel, 0.92f));
+    DrawRectangleRoundedLinesEx(panel, 0.09f, 8, 1.0f, palette->panel_border);
+    gui_draw_text("Missing Audio Files", (int)panel.x + 12, (int)panel.y + 8, 20, palette->text_primary);
+
+    content = (Rectangle){panel.x + 10.0f, panel.y + 34.0f, panel.width - 20.0f, panel.height - 42.0f};
+    if (content.height < 20.0f || content.width < 40.0f) {
+        g_missing_audio_thumb_dragging = false;
+        return;
+    }
+
+    visible = (int)(content.height / (float)line_h);
+    if (visible < 1) {
+        visible = 1;
+    }
+
+    max_start = entry_count - visible;
+    if (max_start < 0) {
+        max_start = 0;
+    }
+
+    hovered = CheckCollisionPointRec(mouse, panel);
+    if (hovered) {
+        float wheel = GetMouseWheelMove();
+        if (wheel != 0.0f) {
+            g_missing_audio_scroll -= (int)(wheel * 2.0f);
+        }
+    }
+
+    if (g_missing_audio_scroll < 0) {
+        g_missing_audio_scroll = 0;
+    }
+    if (g_missing_audio_scroll > max_start) {
+        g_missing_audio_scroll = max_start;
+    }
+
+    if (entry_count > visible) {
+        has_scrollbar = true;
+        track_h = content.height;
+        thumb_h = track_h * ((float)visible / (float)entry_count);
+        if (thumb_h < 22.0f) {
+            thumb_h = 22.0f;
+        }
+
+        t = (max_start > 0) ? ((float)g_missing_audio_scroll / (float)max_start) : 0.0f;
+        thumb.y = content.y + (track_h - thumb_h) * t;
+        track = (Rectangle){content.x + content.width - 5.0f, content.y, 4.0f, track_h};
+        thumb = (Rectangle){content.x + content.width - 6.0f, thumb.y, 6.0f, thumb_h};
+
+        if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+            if (CheckCollisionPointRec(mouse, thumb)) {
+                g_missing_audio_thumb_dragging = true;
+                g_missing_audio_thumb_drag_offset = mouse.y - thumb.y;
+            } else if (CheckCollisionPointRec(mouse, track)) {
+                float new_thumb_y;
+                g_missing_audio_thumb_dragging = true;
+                g_missing_audio_thumb_drag_offset = thumb_h * 0.5f;
+                new_thumb_y = mouse.y - g_missing_audio_thumb_drag_offset;
+                if (new_thumb_y < content.y) {
+                    new_thumb_y = content.y;
+                }
+                if (new_thumb_y > content.y + track_h - thumb_h) {
+                    new_thumb_y = content.y + track_h - thumb_h;
+                }
+                t = (track_h > thumb_h) ? ((new_thumb_y - content.y) / (track_h - thumb_h)) : 0.0f;
+                g_missing_audio_scroll = (int)lroundf(t * (float)max_start);
+            }
+        }
+
+        if (g_missing_audio_thumb_dragging) {
+            if (!IsMouseButtonDown(MOUSE_LEFT_BUTTON)) {
+                g_missing_audio_thumb_dragging = false;
+            } else {
+                float new_thumb_y = mouse.y - g_missing_audio_thumb_drag_offset;
+                if (new_thumb_y < content.y) {
+                    new_thumb_y = content.y;
+                }
+                if (new_thumb_y > content.y + track_h - thumb_h) {
+                    new_thumb_y = content.y + track_h - thumb_h;
+                }
+                t = (track_h > thumb_h) ? ((new_thumb_y - content.y) / (track_h - thumb_h)) : 0.0f;
+                g_missing_audio_scroll = (int)lroundf(t * (float)max_start);
+            }
+        }
+
+        if (g_missing_audio_scroll < 0) {
+            g_missing_audio_scroll = 0;
+        }
+        if (g_missing_audio_scroll > max_start) {
+            g_missing_audio_scroll = max_start;
+        }
+
+        t = (max_start > 0) ? ((float)g_missing_audio_scroll / (float)max_start) : 0.0f;
+        thumb.y = content.y + (track_h - thumb_h) * t;
+
+        if (g_missing_audio_thumb_dragging) {
+            SetMouseCursor(MOUSE_CURSOR_RESIZE_NS);
+        } else if (CheckCollisionPointRec(mouse, thumb) || CheckCollisionPointRec(mouse, track)) {
+            SetMouseCursor(MOUSE_CURSOR_POINTING_HAND);
+        }
+    } else {
+        g_missing_audio_thumb_dragging = false;
+    }
+
+    start = g_missing_audio_scroll;
+    text_w = (int)content.width - (has_scrollbar ? 16 : 2);
+    if (text_w < 10) {
+        text_w = 10;
+    }
+
+    if (entry_count == 0) {
+        draw_text_fit("All audio files are available.",
+                      (int)content.x,
+                      (int)content.y + 4,
+                      18,
+                      text_w,
+                      palette->text_secondary);
+    } else {
+        for (int i = 0; i < visible; ++i) {
+            int idx = start + i;
+            if (idx >= entry_count) {
+                break;
+            }
+            draw_text_fit(entries[idx],
+                          (int)content.x,
+                          (int)(content.y + (float)(i * line_h)),
+                          18,
+                          text_w,
+                          palette->text_secondary);
+        }
+    }
+
+    if (has_scrollbar) {
+        DrawRectangleRounded(track, 0.4f, 6, Fade(palette->panel_border, 0.55f));
+        DrawRectangleRounded(thumb, 0.4f, 6, palette->accent);
+    }
+}
+
 void gui_screen_settings(struct ChessApp* app) {
     const GuiPalette* palette = gui_palette();
     float sw = (float)GetScreenWidth();
@@ -274,8 +433,16 @@ void gui_screen_settings(struct ChessApp* app) {
         float sfx_value = app->sfx_volume;
         float menu_music_value = app->menu_music_volume;
         float game_music_value = app->game_music_volume;
-        float status_y = game_music_row.y + game_music_row.height + 18.0f;
-        int status_w = (int)right_card.width - 36;
+        Rectangle missing_panel = {
+            right_card.x + 16.0f,
+            game_music_row.y + game_music_row.height + 12.0f,
+            right_card.width - 32.0f,
+            right_card.y + right_card.height - (game_music_row.y + game_music_row.height + 12.0f) - 12.0f
+        };
+        const char* missing_entries[AUDIO_SFX_COUNT + 2];
+        int missing_count = 0;
+        char menu_missing_line[64];
+        char game_missing_line[64];
 
         if (gui_button(toggle_btn, toggle_label)) {
             app->sound_enabled = !app->sound_enabled;
@@ -305,73 +472,24 @@ void gui_screen_settings(struct ChessApp* app) {
         }
 
         if (!audio_is_menu_music_loaded()) {
-            draw_text_fit("Missing menu music: menu_bgm.ogg / .mp3 / .wav",
-                          (int)right_card.x + 18,
-                          (int)status_y,
-                          19,
-                          status_w,
-                          palette->text_secondary);
-            status_y += 23.0f;
+            snprintf(menu_missing_line, sizeof(menu_missing_line), "music: menu_bgm.ogg / .mp3 / .wav");
+            missing_entries[missing_count++] = menu_missing_line;
         }
         if (!audio_is_game_music_loaded()) {
-            draw_text_fit("Missing game music: game_bgm.ogg / .mp3 / .wav",
-                          (int)right_card.x + 18,
-                          (int)status_y,
-                          19,
-                          status_w,
-                          palette->text_secondary);
-            status_y += 23.0f;
+            snprintf(game_missing_line, sizeof(game_missing_line), "music: game_bgm.ogg / .mp3 / .wav");
+            missing_entries[missing_count++] = game_missing_line;
         }
 
-        {
-            int missing_sfx[AUDIO_SFX_COUNT];
-            int missing_count = 0;
-            float bottom_y = right_card.y + right_card.height - 14.0f;
-            int line_h = 21;
-            int drawn = 0;
-
-            for (int i = 0; i < AUDIO_SFX_COUNT; ++i) {
-                if (!audio_is_loaded((AudioSfx)i)) {
-                    missing_sfx[missing_count++] = i;
-                }
-            }
-
-            if (missing_count > 0 && status_y + 18.0f < bottom_y) {
-                draw_text_fit("Missing SFX files:",
-                              (int)right_card.x + 18,
-                              (int)status_y,
-                              19,
-                              status_w,
-                              palette->text_secondary);
-                status_y += 23.0f;
-            }
-
-            while (drawn < missing_count && status_y + (float)line_h <= bottom_y) {
-                int remaining_after_this = missing_count - (drawn + 1);
-                int lines_left = (int)((bottom_y - status_y) / (float)line_h);
-
-                if (lines_left <= 1 && remaining_after_this > 0) {
-                    char more_line[32];
-                    snprintf(more_line, sizeof(more_line), "+%d more...", remaining_after_this + 1);
-                    draw_text_fit(more_line,
-                                  (int)right_card.x + 26,
-                                  (int)status_y,
-                                  18,
-                                  status_w - 8,
-                                  palette->text_secondary);
-                    break;
-                }
-
-                draw_text_fit(audio_expected_filename((AudioSfx)missing_sfx[drawn]),
-                              (int)right_card.x + 26,
-                              (int)status_y,
-                              18,
-                              status_w - 8,
-                              palette->text_secondary);
-                status_y += (float)line_h;
-                drawn++;
+        for (int i = 0; i < AUDIO_SFX_COUNT; ++i) {
+            if (!audio_is_loaded((AudioSfx)i)) {
+                missing_entries[missing_count++] = audio_expected_filename((AudioSfx)i);
             }
         }
+
+        if (missing_panel.height < 52.0f) {
+            missing_panel.height = 52.0f;
+        }
+        draw_missing_audio_panel(missing_panel, missing_entries, missing_count);
     }
 
     if (dirty) {
