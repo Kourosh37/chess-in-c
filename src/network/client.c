@@ -316,6 +316,22 @@ bool network_client_send_move(NetworkClient* client, Move move) {
     return send_packet(client, &packet, (const struct sockaddr*)client->peer_addr_storage, client->peer_addr_len);
 }
 
+/* Sends a control packet with optional flag payload. */
+static bool network_client_send_control(NetworkClient* client, uint8_t type, uint8_t flags) {
+    NetPacket packet;
+
+    if (client == NULL || !client->initialized || !client->connected || client->peer_addr_len <= 0) {
+        return false;
+    }
+
+    memset(&packet, 0, sizeof(packet));
+    packet.type = type;
+    packet.flags = flags;
+    packet.sequence = ++client->sequence;
+
+    return send_packet(client, &packet, (const struct sockaddr*)client->peer_addr_storage, client->peer_addr_len);
+}
+
 /* Sends a leave packet to peer before local user exits an online match. */
 bool network_client_send_leave(NetworkClient* client) {
     NetPacket packet;
@@ -332,6 +348,16 @@ bool network_client_send_leave(NetworkClient* client) {
                        &packet,
                        (const struct sockaddr*)client->peer_addr_storage,
                        client->peer_addr_len);
+}
+
+/* Sends local ready/unready state for lobby synchronization. */
+bool network_client_send_ready(NetworkClient* client, bool ready) {
+    return network_client_send_control(client, NET_MSG_READY, ready ? 1U : 0U);
+}
+
+/* Sends start command from host to guest once both sides are ready. */
+bool network_client_send_start(NetworkClient* client) {
+    return network_client_send_control(client, NET_MSG_START, 0U);
 }
 
 /* Polls one incoming packet and updates host/guest session state machine. */
@@ -383,17 +409,17 @@ bool network_client_poll(NetworkClient* client, NetPacket* out_packet) {
         }
     }
 
-    if (packet.type == NET_MSG_MOVE && client->peer_addr_len > 0) {
+    if ((packet.type == NET_MSG_MOVE ||
+         packet.type == NET_MSG_LEAVE ||
+         packet.type == NET_MSG_READY ||
+         packet.type == NET_MSG_START) &&
+        client->peer_addr_len > 0) {
         if (!sockaddr_equals((const struct sockaddr*)client->peer_addr_storage, (const struct sockaddr*)&from)) {
             return false;
         }
     }
 
     if (packet.type == NET_MSG_LEAVE && client->peer_addr_len > 0) {
-        if (!sockaddr_equals((const struct sockaddr*)client->peer_addr_storage, (const struct sockaddr*)&from)) {
-            return false;
-        }
-
         client->connected = false;
         if (client->is_host) {
             client->peer_addr_len = 0;

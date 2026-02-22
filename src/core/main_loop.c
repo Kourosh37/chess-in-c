@@ -124,24 +124,31 @@ static void maybe_process_network(ChessApp* app) {
         if (packet.type == NET_MSG_JOIN_REQUEST) {
             if (app->network.connected && app->network.is_host) {
                 audio_play(AUDIO_SFX_LOBBY_JOIN);
+                app->mode = MODE_ONLINE;
+                app->human_side = SIDE_WHITE;
+                app->lobby_view = LOBBY_VIEW_HOST;
+                app->online_local_ready = false;
+                app->online_peer_ready = false;
 
-                if (app->mode == MODE_ONLINE && app->online_match_active) {
+                if (app->lobby_code[0] != '\0') {
+                    strncpy(app->online_match_code, app->lobby_code, INVITE_CODE_LEN);
+                    app->online_match_code[INVITE_CODE_LEN] = '\0';
+                }
+
+                if (app->online_match_active) {
                     snprintf(app->online_runtime_status,
                              sizeof(app->online_runtime_status),
                              "Opponent reconnected.");
                     snprintf(app->lobby_status,
                              sizeof(app->lobby_status),
                              "Opponent reconnected to active match.");
-                } else if (app->screen == SCREEN_LOBBY) {
-                    snprintf(app->lobby_status, sizeof(app->lobby_status), "Guest joined. Match starts now.");
-                    app->human_side = SIDE_WHITE;
-                    app->online_match_active = true;
-                    strncpy(app->online_match_code, app->lobby_code, INVITE_CODE_LEN);
-                    app->online_match_code[INVITE_CODE_LEN] = '\0';
+                } else {
+                    snprintf(app->lobby_status,
+                             sizeof(app->lobby_status),
+                             "Player joined room. Waiting for Ready.");
                     snprintf(app->online_runtime_status,
                              sizeof(app->online_runtime_status),
-                             "Opponent connected. Match is live.");
-                    app_start_game(app, MODE_ONLINE);
+                             "Room has 2 players. Opponent must press Ready.");
                 }
             }
             continue;
@@ -150,6 +157,19 @@ static void maybe_process_network(ChessApp* app) {
         if (packet.type == NET_MSG_JOIN_ACCEPT) {
             if (app->network.connected && !app->network.is_host) {
                 audio_play(AUDIO_SFX_LOBBY_JOIN);
+                app->mode = MODE_ONLINE;
+                app->human_side = SIDE_BLACK;
+                app->lobby_view = LOBBY_VIEW_JOIN;
+                app->online_local_ready = false;
+                app->online_peer_ready = false;
+
+                if (packet.invite_code[0] != '\0') {
+                    strncpy(app->online_match_code, packet.invite_code, INVITE_CODE_LEN);
+                    app->online_match_code[INVITE_CODE_LEN] = '\0';
+                } else {
+                    strncpy(app->online_match_code, app->lobby_input, INVITE_CODE_LEN);
+                    app->online_match_code[INVITE_CODE_LEN] = '\0';
+                }
 
                 if (app->mode == MODE_ONLINE && app->online_match_active) {
                     snprintf(app->online_runtime_status,
@@ -158,21 +178,13 @@ static void maybe_process_network(ChessApp* app) {
                     snprintf(app->lobby_status,
                              sizeof(app->lobby_status),
                              "Reconnected to host.");
-                } else if (app->screen == SCREEN_LOBBY) {
-                    snprintf(app->lobby_status, sizeof(app->lobby_status), "Connected to host. Match starts now.");
-                    app->human_side = SIDE_BLACK;
-                    app->online_match_active = true;
-                    if (packet.invite_code[0] != '\0') {
-                        strncpy(app->online_match_code, packet.invite_code, INVITE_CODE_LEN);
-                        app->online_match_code[INVITE_CODE_LEN] = '\0';
-                    } else {
-                        strncpy(app->online_match_code, app->lobby_input, INVITE_CODE_LEN);
-                        app->online_match_code[INVITE_CODE_LEN] = '\0';
-                    }
+                } else {
+                    snprintf(app->lobby_status,
+                             sizeof(app->lobby_status),
+                             "Connected. Press Ready and wait for host.");
                     snprintf(app->online_runtime_status,
                              sizeof(app->online_runtime_status),
-                             "Connected to host. Match is live.");
-                    app_start_game(app, MODE_ONLINE);
+                             "Connected to host. Waiting for Start.");
                 }
             }
             continue;
@@ -181,6 +193,39 @@ static void maybe_process_network(ChessApp* app) {
         if (packet.type == NET_MSG_JOIN_REJECT) {
             if (app->screen == SCREEN_LOBBY) {
                 snprintf(app->lobby_status, sizeof(app->lobby_status), "Host rejected the join request.");
+            }
+            continue;
+        }
+
+        if (packet.type == NET_MSG_READY) {
+            if (app->mode == MODE_ONLINE && !app->online_match_active) {
+                bool ready = (packet.flags & 1U) != 0U;
+                app->online_peer_ready = ready;
+
+                if (app->network.is_host) {
+                    snprintf(app->lobby_status,
+                             sizeof(app->lobby_status),
+                             ready ? "Opponent is Ready. You can start the game."
+                                   : "Opponent is not ready yet.");
+                } else {
+                    snprintf(app->lobby_status,
+                             sizeof(app->lobby_status),
+                             ready ? "Host is ready. Waiting for Start."
+                                   : "Host is not ready.");
+                }
+            }
+            continue;
+        }
+
+        if (packet.type == NET_MSG_START) {
+            if (app->mode == MODE_ONLINE && app->network.connected && !app->online_match_active) {
+                app->online_match_active = true;
+                app->online_local_ready = false;
+                app->online_peer_ready = false;
+                snprintf(app->online_runtime_status,
+                         sizeof(app->online_runtime_status),
+                         "Match started.");
+                app_start_game(app, MODE_ONLINE);
             }
             continue;
         }
@@ -200,16 +245,37 @@ static void maybe_process_network(ChessApp* app) {
         }
 
         if (packet.type == NET_MSG_LEAVE) {
-            if (app->mode == MODE_ONLINE && app->online_match_active) {
-                app->online_match_active = false;
-                app->leave_confirm_open = false;
-                app->network.connected = false;
-                snprintf(app->online_runtime_status,
-                         sizeof(app->online_runtime_status),
-                         "Opponent left the match.");
-                snprintf(app->lobby_status,
-                         sizeof(app->lobby_status),
-                         "Opponent left the match. You can host/join a new game.");
+            if (app->mode == MODE_ONLINE) {
+                app->online_peer_ready = false;
+
+                if (app->online_match_active) {
+                    app->online_match_active = false;
+                    app->leave_confirm_open = false;
+                    app->network.connected = false;
+                    snprintf(app->online_runtime_status,
+                             sizeof(app->online_runtime_status),
+                             "Opponent left the match.");
+                    snprintf(app->lobby_status,
+                             sizeof(app->lobby_status),
+                             "Opponent left the match. You can host/join a new game.");
+                } else if (app->network.is_host) {
+                    app->network.connected = false;
+                    snprintf(app->online_runtime_status,
+                             sizeof(app->online_runtime_status),
+                             "Room has 1 player.");
+                    snprintf(app->lobby_status,
+                             sizeof(app->lobby_status),
+                             "Opponent left room.");
+                } else {
+                    app->network.connected = false;
+                    app->online_local_ready = false;
+                    snprintf(app->online_runtime_status,
+                             sizeof(app->online_runtime_status),
+                             "Disconnected from host.");
+                    snprintf(app->lobby_status,
+                             sizeof(app->lobby_status),
+                             "Host closed the room.");
+                }
             }
         }
     }
@@ -258,7 +324,7 @@ int run_main_loop(void) {
         }
     }
 
-    if (app.online_match_active) {
+    if (app.online_match_active || app.network.connected) {
         network_client_send_leave(&app.network);
     }
 

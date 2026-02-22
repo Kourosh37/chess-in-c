@@ -242,10 +242,15 @@ void app_init(ChessApp* app) {
 
     app->lobby_input[0] = '\0';
     app->lobby_code[0] = '\0';
+    app->lobby_view = LOBBY_VIEW_HOME;
+    app->lobby_copy_feedback_timer = 0.0f;
+    app->lobby_copy_feedback = false;
     app->move_log_count = 0;
     app->move_log_scroll = 0;
     app->online_match_code[0] = '\0';
     app->online_match_active = false;
+    app->online_local_ready = false;
+    app->online_peer_ready = false;
     app->leave_confirm_open = false;
     app->exit_confirm_open = false;
     snprintf(app->online_runtime_status,
@@ -273,6 +278,8 @@ void app_start_game(ChessApp* app, GameMode mode) {
     app->last_move_to = -1;
     app->leave_confirm_open = false;
     app->exit_confirm_open = false;
+    app->online_local_ready = false;
+    app->online_peer_ready = false;
     app->move_log_count = 0;
     app->move_log_scroll = 0;
 
@@ -406,8 +413,15 @@ void app_online_end_match(ChessApp* app, bool notify_peer) {
     app->network.is_host = false;
 
     app->online_match_active = false;
+    app->online_local_ready = false;
+    app->online_peer_ready = false;
     app->online_match_code[0] = '\0';
     app->lobby_code[0] = '\0';
+    app->lobby_input[0] = '\0';
+    app->lobby_view = LOBBY_VIEW_HOME;
+    app->lobby_input_active = false;
+    app->lobby_copy_feedback = false;
+    app->lobby_copy_feedback_timer = 0.0f;
     app->leave_confirm_open = false;
     app->mode = MODE_SINGLE;
 

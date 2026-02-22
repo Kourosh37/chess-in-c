@@ -37,6 +37,8 @@ bool network_client_host(NetworkClient* client, const char* username, char out_c
 bool network_client_join(NetworkClient* client, const char* username, const char* invite_code);
 bool network_client_send_move(NetworkClient* client, Move move);
 bool network_client_send_leave(NetworkClient* client);
+bool network_client_send_ready(NetworkClient* client, bool ready);
+bool network_client_send_start(NetworkClient* client);
 bool network_client_poll(NetworkClient* client, NetPacket* out_packet);
 
 /* Invite-code utilities. */

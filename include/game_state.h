@@ -38,7 +38,12 @@ typedef struct ChessApp {
     char lobby_input[INVITE_CODE_LEN + 1];
     bool lobby_input_active;
     char lobby_status[96];
+    LobbyView lobby_view;
+    float lobby_copy_feedback_timer;
+    bool lobby_copy_feedback;
     bool online_match_active;
+    bool online_local_ready;
+    bool online_peer_ready;
     char online_match_code[INVITE_CODE_LEN + 1];
     char online_runtime_status[128];
 

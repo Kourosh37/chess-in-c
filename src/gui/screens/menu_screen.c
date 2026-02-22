@@ -147,9 +147,15 @@ void gui_screen_menu(struct ChessApp* app) {
         if (gui_button(online_btn, "Online")) {
             app->mode = MODE_ONLINE;
             app->screen = SCREEN_LOBBY;
+            app->lobby_view = LOBBY_VIEW_HOME;
             app->lobby_input[0] = '\0';
             app->lobby_code[0] = '\0';
-            snprintf(app->lobby_status, sizeof(app->lobby_status), "Host or join with invite code.");
+            app->lobby_input_active = false;
+            app->online_local_ready = false;
+            app->online_peer_ready = false;
+            app->lobby_copy_feedback = false;
+            app->lobby_copy_feedback_timer = 0.0f;
+            snprintf(app->lobby_status, sizeof(app->lobby_status), "Choose Host Game or Join Game.");
         }
 
         if (has_resume && gui_button(resume_btn, "Resume Online Match")) {

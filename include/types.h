@@ -51,6 +51,13 @@ typedef enum AppScreen {
     SCREEN_SETTINGS = 3
 } AppScreen;
 
+/* Lobby view states for simplified online UX flow. */
+typedef enum LobbyView {
+    LOBBY_VIEW_HOME = 0,
+    LOBBY_VIEW_JOIN = 1,
+    LOBBY_VIEW_HOST = 2
+} LobbyView;
+
 /* Built-in visual themes exposed in the settings screen. */
 typedef enum ColorTheme {
     THEME_CLASSIC = 0,

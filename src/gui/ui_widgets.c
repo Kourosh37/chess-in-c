@@ -78,9 +78,28 @@ void gui_input_box(Rectangle bounds, char* buffer, int capacity, bool active) {
     DrawRectangleRoundedLinesEx(bounds, 0.12f, 8, active ? 2.0f : 1.0f, border);
 
     if (active) {
+        bool paste = ((IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL)) && IsKeyPressed(KEY_V)) ||
+                     (IsKeyDown(KEY_LEFT_SHIFT) && IsKeyPressed(KEY_INSERT));
+
+        if (paste) {
+            const char* clip = GetClipboardText();
+            int out = 0;
+
+            if (clip != NULL) {
+                for (int i = 0; clip[i] != '\0' && out < capacity - 1; ++i) {
+                    unsigned char c = (unsigned char)clip[i];
+                    if (isalnum(c) || c == '-' || c == '_') {
+                        buffer[out++] = (char)toupper(c);
+                    }
+                }
+            }
+            buffer[out] = '\0';
+        }
+
         int key = GetCharPressed();
         while (key > 0) {
-            if ((isalnum((unsigned char)key) || key == '-' || key == '_') &&
+            if (!paste &&
+                (isalnum((unsigned char)key) || key == '-' || key == '_') &&
                 (int)strlen(buffer) < capacity - 1) {
                 size_t len = strlen(buffer);
                 buffer[len] = (char)toupper((unsigned char)key);
