@@ -301,14 +301,18 @@ int run_main_loop(void) {
     audio_init();
     audio_set_enabled(app.sound_enabled);
     audio_set_master_volume(app.sound_volume);
+    audio_set_menu_music_active(true);
 
     while (!WindowShouldClose()) {
         maybe_process_network(&app);
         maybe_process_ai_turn(&app, &worker);
         app_tick(&app, GetFrameTime());
         gui_set_active_theme(app.theme);
+        audio_set_menu_music_active(app.screen == SCREEN_MENU);
+        audio_update();
 
         BeginDrawing();
+        SetMouseCursor(MOUSE_CURSOR_DEFAULT);
         gui_draw_background();
 
         if (app.screen == SCREEN_MENU) {

@@ -198,7 +198,7 @@ void gui_screen_lobby(struct ChessApp* app) {
 
         gui_draw_text("Join Game", (int)card.x + 36, (int)card.y + 36, 34, palette->text_primary);
 
-        if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+        if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) || IsMouseButtonPressed(MOUSE_RIGHT_BUTTON)) {
             app->lobby_input_active = CheckCollisionPointRec(GetMousePosition(), input_box);
         }
         gui_input_box(input_box, app->lobby_input, INVITE_CODE_LEN + 1, app->lobby_input_active);

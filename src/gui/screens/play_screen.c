@@ -1,5 +1,6 @@
 #include "gui.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -96,15 +97,26 @@ static bool find_selected_move(const ChessApp* app, int from, int to, uint8_t pr
 }
 
 /* Draws scrollable move history panel and handles mouse-wheel scrolling. */
+static bool g_move_log_thumb_dragging = false;
+static float g_move_log_thumb_drag_offset = 0.0f;
+
 static void draw_move_log_panel(ChessApp* app, Rectangle panel) {
     const GuiPalette* palette = gui_palette();
     Rectangle content = {panel.x + 10.0f, panel.y + 38.0f, panel.width - 20.0f, panel.height - 48.0f};
-    float wheel = 0.0f;
+    Vector2 mouse = GetMousePosition();
+    float wheel;
     int line_h = 22;
     int visible;
     int max_start;
     int start;
     int y;
+    bool panel_hovered;
+    bool has_scrollbar = false;
+    Rectangle track = {0};
+    Rectangle thumb = {0};
+    float track_h = 0.0f;
+    float thumb_h = 0.0f;
+    float t = 0.0f;
 
     DrawRectangleRounded(panel, 0.08f, 8, Fade(palette->panel, 0.92f));
     DrawRectangleRoundedLinesEx(panel, 0.08f, 8, 1.0f, palette->panel_border);
@@ -120,10 +132,24 @@ static void draw_move_log_panel(ChessApp* app, Rectangle panel) {
         max_start = 0;
     }
 
-    if (CheckCollisionPointRec(GetMousePosition(), panel)) {
+    panel_hovered = CheckCollisionPointRec(mouse, panel);
+    if (panel_hovered) {
         wheel = GetMouseWheelMove();
         if (wheel != 0.0f) {
             app->move_log_scroll -= (int)(wheel * 2.0f);
+        }
+
+        if (IsKeyPressed(KEY_PAGE_UP)) {
+            app->move_log_scroll -= visible;
+        }
+        if (IsKeyPressed(KEY_PAGE_DOWN)) {
+            app->move_log_scroll += visible;
+        }
+        if (IsKeyPressed(KEY_HOME)) {
+            app->move_log_scroll = 0;
+        }
+        if (IsKeyPressed(KEY_END)) {
+            app->move_log_scroll = max_start;
         }
     }
 
@@ -132,6 +158,78 @@ static void draw_move_log_panel(ChessApp* app, Rectangle panel) {
     }
     if (app->move_log_scroll > max_start) {
         app->move_log_scroll = max_start;
+    }
+
+    if (app->move_log_count > visible) {
+        has_scrollbar = true;
+        track_h = content.height;
+        thumb_h = track_h * ((float)visible / (float)app->move_log_count);
+        if (thumb_h < 22.0f) {
+            thumb_h = 22.0f;
+        }
+
+        t = (max_start > 0) ? ((float)app->move_log_scroll / (float)max_start) : 0.0f;
+        thumb.y = content.y + (track_h - thumb_h) * t;
+        track = (Rectangle){panel.x + panel.width - 10.0f, content.y, 4.0f, track_h};
+        thumb = (Rectangle){panel.x + panel.width - 11.0f, thumb.y, 6.0f, thumb_h};
+
+        if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+            if (CheckCollisionPointRec(mouse, thumb)) {
+                g_move_log_thumb_dragging = true;
+                g_move_log_thumb_drag_offset = mouse.y - thumb.y;
+            } else if (CheckCollisionPointRec(mouse, track)) {
+                float new_thumb_y;
+
+                g_move_log_thumb_dragging = true;
+                g_move_log_thumb_drag_offset = thumb_h * 0.5f;
+                new_thumb_y = mouse.y - g_move_log_thumb_drag_offset;
+                if (new_thumb_y < content.y) {
+                    new_thumb_y = content.y;
+                }
+                if (new_thumb_y > content.y + track_h - thumb_h) {
+                    new_thumb_y = content.y + track_h - thumb_h;
+                }
+
+                t = (track_h > thumb_h) ? ((new_thumb_y - content.y) / (track_h - thumb_h)) : 0.0f;
+                app->move_log_scroll = (int)roundf(t * (float)max_start);
+            }
+        }
+
+        if (g_move_log_thumb_dragging) {
+            if (!IsMouseButtonDown(MOUSE_LEFT_BUTTON)) {
+                g_move_log_thumb_dragging = false;
+            } else {
+                float new_thumb_y = mouse.y - g_move_log_thumb_drag_offset;
+
+                if (new_thumb_y < content.y) {
+                    new_thumb_y = content.y;
+                }
+                if (new_thumb_y > content.y + track_h - thumb_h) {
+                    new_thumb_y = content.y + track_h - thumb_h;
+                }
+
+                t = (track_h > thumb_h) ? ((new_thumb_y - content.y) / (track_h - thumb_h)) : 0.0f;
+                app->move_log_scroll = (int)roundf(t * (float)max_start);
+            }
+        }
+
+        if (app->move_log_scroll < 0) {
+            app->move_log_scroll = 0;
+        }
+        if (app->move_log_scroll > max_start) {
+            app->move_log_scroll = max_start;
+        }
+
+        t = (max_start > 0) ? ((float)app->move_log_scroll / (float)max_start) : 0.0f;
+        thumb.y = content.y + (track_h - thumb_h) * t;
+
+        if (g_move_log_thumb_dragging) {
+            SetMouseCursor(MOUSE_CURSOR_RESIZE_NS);
+        } else if (CheckCollisionPointRec(mouse, thumb) || CheckCollisionPointRec(mouse, track)) {
+            SetMouseCursor(MOUSE_CURSOR_POINTING_HAND);
+        }
+    } else {
+        g_move_log_thumb_dragging = false;
     }
 
     start = app->move_log_scroll;
@@ -149,25 +247,7 @@ static void draw_move_log_panel(ChessApp* app, Rectangle panel) {
         }
     }
 
-    if (app->move_log_count > visible) {
-        float track_h = content.height;
-        float ratio = (float)visible / (float)app->move_log_count;
-        float thumb_h = track_h * ratio;
-        float t;
-        float thumb_y;
-        Rectangle track;
-        Rectangle thumb;
-
-        if (thumb_h < 22.0f) {
-            thumb_h = 22.0f;
-        }
-
-        t = (max_start > 0) ? ((float)start / (float)max_start) : 0.0f;
-        thumb_y = content.y + (track_h - thumb_h) * t;
-
-        track = (Rectangle){panel.x + panel.width - 10.0f, content.y, 4.0f, track_h};
-        thumb = (Rectangle){panel.x + panel.width - 11.0f, thumb_y, 6.0f, thumb_h};
-
+    if (has_scrollbar) {
         DrawRectangleRounded(track, 0.4f, 6, Fade(palette->panel_border, 0.55f));
         DrawRectangleRounded(thumb, 0.4f, 6, palette->accent);
     }

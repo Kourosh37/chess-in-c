@@ -32,6 +32,11 @@ bool audio_is_loaded(AudioSfx sfx);
 const char* audio_expected_filename(AudioSfx sfx);
 void audio_play(AudioSfx sfx);
 
+void audio_set_menu_music_active(bool active);
+bool audio_is_menu_music_loaded(void);
+const char* audio_menu_music_expected_filename(void);
+void audio_update(void);
+
 #ifdef __cplusplus
 }
 #endif

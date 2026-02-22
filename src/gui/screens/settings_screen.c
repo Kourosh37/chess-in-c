@@ -292,6 +292,20 @@ void gui_screen_settings(struct ChessApp* app) {
 
         gui_draw_text("SFX Folder", (int)right_card.x + 18, (int)(volume_row.y + volume_row.height + 26.0f), 22, palette->text_secondary);
         gui_draw_text("assets/sfx", (int)right_card.x + 18, (int)(volume_row.y + volume_row.height + 52.0f), 26, palette->text_primary);
+        gui_draw_text("Menu BGM", (int)right_card.x + 18, (int)(volume_row.y + volume_row.height + 82.0f), 22, palette->text_secondary);
+        if (audio_is_menu_music_loaded()) {
+            gui_draw_text(audio_menu_music_expected_filename(),
+                          (int)right_card.x + 18,
+                          (int)(volume_row.y + volume_row.height + 108.0f),
+                          24,
+                          palette->accent);
+        } else {
+            gui_draw_text("Not found (add menu_bgm.ogg/mp3/wav)",
+                          (int)right_card.x + 18,
+                          (int)(volume_row.y + volume_row.height + 108.0f),
+                          20,
+                          palette->text_secondary);
+        }
     }
 
     if (dirty) {

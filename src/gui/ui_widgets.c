@@ -5,6 +5,194 @@
 
 #include "audio.h"
 
+typedef enum InputMenuItem {
+    INPUT_MENU_PASTE = 0,
+    INPUT_MENU_COPY = 1,
+    INPUT_MENU_CUT = 2,
+    INPUT_MENU_SELECT_ALL = 3,
+    INPUT_MENU_CLEAR = 4,
+    INPUT_MENU_COUNT = 5
+} InputMenuItem;
+
+typedef struct InputContextMenu {
+    bool open;
+    Rectangle rect;
+    char* buffer;
+    int capacity;
+} InputContextMenu;
+
+static InputContextMenu g_input_menu = {0};
+static char* g_selected_input_buffer = NULL;
+
+/* True when user currently has select-all state on this input buffer. */
+static bool input_has_selection(char* buffer) {
+    return buffer != NULL && g_selected_input_buffer == buffer;
+}
+
+/* Sets select-all state for one input buffer. */
+static void input_set_selection(char* buffer, bool selected) {
+    if (selected) {
+        g_selected_input_buffer = buffer;
+    } else if (g_selected_input_buffer == buffer) {
+        g_selected_input_buffer = NULL;
+    }
+}
+
+/* Clears select-all state if input content is replaced. */
+static void input_clear_selection(char* buffer) {
+    input_set_selection(buffer, false);
+}
+
+/* True when key should be accepted for invite-style input. */
+static bool is_valid_input_char(int key) {
+    unsigned char c = (unsigned char)key;
+    return (isalnum(c) || c == '-' || c == '_');
+}
+
+/* Appends clipboard text with filtering and uppercase normalization. */
+static void input_paste_filtered(char* buffer, int capacity, bool replace_all) {
+    const char* clip = GetClipboardText();
+    int out;
+
+    if (buffer == NULL || capacity <= 0) {
+        return;
+    }
+
+    out = replace_all ? 0 : (int)strlen(buffer);
+    if (replace_all) {
+        buffer[0] = '\0';
+    }
+
+    if (clip != NULL) {
+        for (int i = 0; clip[i] != '\0' && out < capacity - 1; ++i) {
+            unsigned char c = (unsigned char)clip[i];
+            if (isalnum(c) || c == '-' || c == '_') {
+                buffer[out++] = (char)toupper(c);
+            }
+        }
+    }
+    buffer[out] = '\0';
+}
+
+/* Copies the whole input buffer into system clipboard. */
+static void input_copy_all(const char* buffer) {
+    if (buffer != NULL) {
+        SetClipboardText(buffer);
+    }
+}
+
+/* Clears all text in input buffer. */
+static void input_clear_all(char* buffer) {
+    if (buffer != NULL) {
+        buffer[0] = '\0';
+    }
+}
+
+/* Opens context menu for this input at mouse position with screen clamping. */
+static void input_menu_open(char* buffer, int capacity) {
+    const float menu_w = 176.0f;
+    const float item_h = 31.0f;
+    const float menu_h = 10.0f + item_h * (float)INPUT_MENU_COUNT;
+    float x = GetMousePosition().x;
+    float y = GetMousePosition().y;
+    float sw = (float)GetScreenWidth();
+    float sh = (float)GetScreenHeight();
+
+    if (x + menu_w > sw - 8.0f) {
+        x = sw - menu_w - 8.0f;
+    }
+    if (y + menu_h > sh - 8.0f) {
+        y = sh - menu_h - 8.0f;
+    }
+    if (x < 8.0f) {
+        x = 8.0f;
+    }
+    if (y < 8.0f) {
+        y = 8.0f;
+    }
+
+    g_input_menu.open = true;
+    g_input_menu.buffer = buffer;
+    g_input_menu.capacity = capacity;
+    g_input_menu.rect = (Rectangle){x, y, menu_w, menu_h};
+}
+
+/* Draws and handles input context menu interactions for the focused buffer. */
+static void input_menu_update(char* active_buffer) {
+    const GuiPalette* palette = gui_palette();
+    const char* labels[INPUT_MENU_COUNT] = {"Paste", "Copy", "Cut", "Select All", "Clear"};
+    const float item_h = 31.0f;
+    const float pad = 5.0f;
+    Vector2 mouse = GetMousePosition();
+    bool inside_menu;
+
+    if (!g_input_menu.open || g_input_menu.buffer != active_buffer) {
+        return;
+    }
+
+    inside_menu = CheckCollisionPointRec(mouse, g_input_menu.rect);
+    if (inside_menu) {
+        SetMouseCursor(MOUSE_CURSOR_POINTING_HAND);
+    }
+
+    DrawRectangleRounded((Rectangle){g_input_menu.rect.x + 2.0f,
+                                     g_input_menu.rect.y + 3.0f,
+                                     g_input_menu.rect.width,
+                                     g_input_menu.rect.height},
+                         0.12f,
+                         8,
+                         Fade(BLACK, 0.16f));
+    DrawRectangleRounded(g_input_menu.rect, 0.12f, 8, Fade(palette->panel, 0.98f));
+    DrawRectangleRoundedLinesEx(g_input_menu.rect, 0.12f, 8, 1.2f, palette->panel_border);
+
+    for (int i = 0; i < INPUT_MENU_COUNT; ++i) {
+        Rectangle item = {
+            g_input_menu.rect.x + pad,
+            g_input_menu.rect.y + pad + item_h * (float)i,
+            g_input_menu.rect.width - pad * 2.0f,
+            item_h
+        };
+        bool hovered = CheckCollisionPointRec(mouse, item);
+
+        if (hovered) {
+            DrawRectangleRounded(item, 0.14f, 8, Fade(palette->accent, 0.18f));
+        }
+
+        gui_draw_text(labels[i],
+                      (int)item.x + 12,
+                      (int)(item.y + item.height * 0.5f - 10.0f),
+                      20,
+                      palette->text_primary);
+
+        if (hovered && IsMouseButtonReleased(MOUSE_LEFT_BUTTON)) {
+            if (i == INPUT_MENU_PASTE) {
+                bool replace_all = input_has_selection(g_input_menu.buffer);
+                input_paste_filtered(g_input_menu.buffer, g_input_menu.capacity, replace_all);
+                input_clear_selection(g_input_menu.buffer);
+            } else if (i == INPUT_MENU_COPY) {
+                input_copy_all(g_input_menu.buffer);
+            } else if (i == INPUT_MENU_CUT) {
+                input_copy_all(g_input_menu.buffer);
+                input_clear_all(g_input_menu.buffer);
+                input_clear_selection(g_input_menu.buffer);
+            } else if (i == INPUT_MENU_SELECT_ALL) {
+                input_set_selection(g_input_menu.buffer, true);
+            } else if (i == INPUT_MENU_CLEAR) {
+                input_clear_all(g_input_menu.buffer);
+                input_clear_selection(g_input_menu.buffer);
+            }
+
+            audio_play(AUDIO_SFX_UI_CLICK);
+            g_input_menu.open = false;
+            return;
+        }
+    }
+
+    if ((IsMouseButtonPressed(MOUSE_LEFT_BUTTON) || IsMouseButtonPressed(MOUSE_RIGHT_BUTTON)) && !inside_menu) {
+        g_input_menu.open = false;
+    }
+}
+
 /* Returns a slightly brighter color by adding a fixed offset. */
 static Color brighten(Color color, int amount) {
     int r = color.r + amount;
@@ -41,13 +229,18 @@ bool gui_button(Rectangle bounds, const char* label) {
     const GuiPalette* palette = gui_palette();
     Vector2 mouse = GetMousePosition();
     bool hovered = CheckCollisionPointRec(mouse, bounds);
-    bool pressed = hovered && IsMouseButtonDown(MOUSE_LEFT_BUTTON);
-    bool clicked = hovered && IsMouseButtonReleased(MOUSE_LEFT_BUTTON);
+    bool key_activate = hovered && (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_SPACE));
+    bool pressed = hovered && (IsMouseButtonDown(MOUSE_LEFT_BUTTON) || IsKeyDown(KEY_ENTER) || IsKeyDown(KEY_SPACE));
+    bool clicked = (hovered && IsMouseButtonReleased(MOUSE_LEFT_BUTTON)) || key_activate;
     Color base = hovered ? palette->accent_hover : palette->accent;
     Color fill = pressed ? brighten(base, -18) : base;
     Color border = brighten(base, -28);
     int font_size = (bounds.height >= 56.0f) ? 24 : 20;
     int text_width = gui_measure_text(label, font_size);
+
+    if (hovered) {
+        SetMouseCursor(MOUSE_CURSOR_POINTING_HAND);
+    }
 
     DrawRectangleRounded((Rectangle){bounds.x + 2.5f, bounds.y + 4.0f, bounds.width, bounds.height},
                          0.20f,
@@ -71,55 +264,99 @@ bool gui_button(Rectangle bounds, const char* label) {
 
 void gui_input_box(Rectangle bounds, char* buffer, int capacity, bool active) {
     const GuiPalette* palette = gui_palette();
+    Vector2 mouse = GetMousePosition();
+    bool hovered = CheckCollisionPointRec(mouse, bounds);
     Color bg = active ? brighten(palette->panel_alt, 10) : palette->panel_alt;
     Color border = active ? palette->accent : palette->panel_border;
+    bool ctrl_down = IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL);
+    bool has_selection = input_has_selection(buffer);
 
     DrawRectangleRounded(bounds, 0.12f, 8, bg);
     DrawRectangleRoundedLinesEx(bounds, 0.12f, 8, active ? 2.0f : 1.0f, border);
 
+    if (hovered || active) {
+        SetMouseCursor(MOUSE_CURSOR_IBEAM);
+    }
+
+    if (hovered && IsMouseButtonPressed(MOUSE_RIGHT_BUTTON)) {
+        input_menu_open(buffer, capacity);
+    }
+
     if (active) {
-        bool paste = ((IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL)) && IsKeyPressed(KEY_V)) ||
+        bool paste = (ctrl_down && IsKeyPressed(KEY_V)) ||
                      (IsKeyDown(KEY_LEFT_SHIFT) && IsKeyPressed(KEY_INSERT));
+        bool select_all = ctrl_down && IsKeyPressed(KEY_A);
+        bool copy = ctrl_down && IsKeyPressed(KEY_C);
+        bool cut = ctrl_down && IsKeyPressed(KEY_X);
+        bool backspace = IsKeyPressed(KEY_BACKSPACE);
+        bool del = IsKeyPressed(KEY_DELETE);
+
+        if (select_all) {
+            input_set_selection(buffer, true);
+            has_selection = true;
+        }
+
+        if (copy && has_selection) {
+            input_copy_all(buffer);
+        }
+
+        if (cut && has_selection) {
+            input_copy_all(buffer);
+            input_clear_all(buffer);
+            input_clear_selection(buffer);
+            has_selection = false;
+        }
 
         if (paste) {
-            const char* clip = GetClipboardText();
-            int out = 0;
+            input_paste_filtered(buffer, capacity, has_selection);
+            input_clear_selection(buffer);
+            has_selection = false;
+        }
 
-            if (clip != NULL) {
-                for (int i = 0; clip[i] != '\0' && out < capacity - 1; ++i) {
-                    unsigned char c = (unsigned char)clip[i];
-                    if (isalnum(c) || c == '-' || c == '_') {
-                        buffer[out++] = (char)toupper(c);
-                    }
-                }
+        if ((backspace || del) && has_selection) {
+            input_clear_all(buffer);
+            input_clear_selection(buffer);
+            has_selection = false;
+        } else if (backspace) {
+            size_t len = strlen(buffer);
+            if (len > 0) {
+                buffer[len - 1] = '\0';
             }
-            buffer[out] = '\0';
         }
 
         int key = GetCharPressed();
         while (key > 0) {
-            if (!paste &&
-                (isalnum((unsigned char)key) || key == '-' || key == '_') &&
-                (int)strlen(buffer) < capacity - 1) {
+            if (!paste && is_valid_input_char(key) && (int)strlen(buffer) < capacity - 1) {
+                if (has_selection) {
+                    input_clear_all(buffer);
+                    input_clear_selection(buffer);
+                    has_selection = false;
+                }
                 size_t len = strlen(buffer);
                 buffer[len] = (char)toupper((unsigned char)key);
                 buffer[len + 1] = '\0';
             }
             key = GetCharPressed();
         }
+    }
 
-        if (IsKeyPressed(KEY_BACKSPACE)) {
-            size_t len = strlen(buffer);
-            if (len > 0) {
-                buffer[len - 1] = '\0';
-            }
-        }
+    if (has_selection) {
+        float select_pad = 9.0f;
+        Rectangle selection = {
+            bounds.x + select_pad,
+            bounds.y + 8.0f,
+            bounds.width - select_pad * 2.0f,
+            bounds.height - 16.0f
+        };
+        DrawRectangleRounded(selection, 0.10f, 8, Fade(palette->accent, 0.18f));
     }
 
     gui_draw_text(buffer, (int)bounds.x + 12, (int)bounds.y + 12, 24, palette->text_primary);
 
-    if (active && ((GetTime() * 2.0) - (int)(GetTime() * 2.0) < 0.5)) {
+    if (active && !has_selection && ((GetTime() * 2.0) - (int)(GetTime() * 2.0) < 0.5)) {
         int text_w = gui_measure_text(buffer, 24);
         DrawRectangle((int)(bounds.x + 12 + (float)text_w + 1), (int)bounds.y + 10, 2, 28, palette->text_primary);
     }
+
+    input_menu_update(buffer);
 }
