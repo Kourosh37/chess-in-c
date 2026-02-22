@@ -51,9 +51,9 @@ _deps/
 # ------------------------------------------------------------
 profile.dat
 settings.dat
+online_matches.dat
 *.log
 
 # OS junk
 .DS_Store
 Thumbs.db
-

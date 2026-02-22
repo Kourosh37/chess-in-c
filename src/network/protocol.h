@@ -2,7 +2,7 @@
 #define PROTOCOL_H
 
 /*
- * Compact wire protocol used by the P2P UDP transport.
+ * Compact wire protocol used by the TCP relay transport.
  * Payload intentionally stays minimal (mostly move coordinates + metadata).
  */
 
@@ -22,7 +22,10 @@ typedef enum NetMsgType {
     NET_MSG_PONG = 8,
     NET_MSG_LEAVE = 9,
     NET_MSG_READY = 10,
-    NET_MSG_START = 11
+    NET_MSG_START = 11,
+    NET_MSG_RELAY_HOST = 12,
+    NET_MSG_RELAY_JOIN = 13,
+    NET_MSG_RELAY_HOST_ACK = 14
 } NetMsgType;
 
 /* Packed message for direct UDP transfer. */

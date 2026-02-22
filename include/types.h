@@ -59,6 +59,15 @@ typedef enum LobbyView {
     LOBBY_VIEW_ACTIVE = 3
 } LobbyView;
 
+/* Async online actions executed by background worker to keep UI responsive. */
+typedef enum OnlineAsyncAction {
+    ONLINE_ASYNC_NONE = 0,
+    ONLINE_ASYNC_ENTER_LOBBY = 1,
+    ONLINE_ASYNC_HOST_ROOM = 2,
+    ONLINE_ASYNC_JOIN_ROOM = 3,
+    ONLINE_ASYNC_RECONNECT_ROOM = 4
+} OnlineAsyncAction;
+
 /* Built-in visual themes exposed in the settings screen. */
 typedef enum ColorTheme {
     THEME_CLASSIC = 0,

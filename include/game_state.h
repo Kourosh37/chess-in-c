@@ -86,6 +86,16 @@ typedef struct ChessApp {
     int online_leave_notice_match;
     char online_leave_notice_title[64];
     char online_leave_notice_text[192];
+    bool network_error_popup_open;
+    char network_error_popup_title[64];
+    char network_error_popup_text[256];
+    bool online_loading;
+    OnlineAsyncAction online_loading_action;
+    int online_loading_match_index;
+    bool online_loading_reconnect_host;
+    char online_loading_code[INVITE_CODE_LEN + 1];
+    char online_loading_title[64];
+    char online_loading_text[160];
     int current_online_match;
     OnlineMatch online_matches[ONLINE_MATCH_MAX];
 
@@ -138,8 +148,18 @@ bool app_online_send_start(ChessApp* app, int index);
 void app_online_mark_started(ChessApp* app, int index);
 void app_online_store_current_match(ChessApp* app);
 bool app_online_switch_to_match(ChessApp* app, int index, bool open_play_screen);
+bool app_online_reconnect_match(ChessApp* app, int index);
+int app_online_attach_host_client(ChessApp* app, NetworkClient* client, const char* invite_code);
+int app_online_attach_join_client(ChessApp* app, NetworkClient* client, const char* invite_code);
+bool app_online_attach_reconnect_client(ChessApp* app,
+                                        int index,
+                                        NetworkClient* client,
+                                        bool is_host_reconnect);
 void app_online_close_match(ChessApp* app, int index, bool notify_peer);
 void app_online_close_all(ChessApp* app, bool notify_peer);
 bool app_online_name_is_set(const ChessApp* app);
+bool app_online_save_sessions(const ChessApp* app);
+void app_show_network_error(ChessApp* app, const char* title, const char* message);
+void app_clear_network_error(ChessApp* app);
 
 #endif

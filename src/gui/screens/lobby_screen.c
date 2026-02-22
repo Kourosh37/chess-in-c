@@ -1,5 +1,6 @@
 #include "gui.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -50,6 +51,191 @@ static void draw_text_fit(const char* text,
     gui_draw_text(buffer, x, y, font_size, color);
 }
 
+/* Draws wrapped text inside width to avoid modal text overflow. */
+static int draw_text_wrap(const char* text,
+                          int x,
+                          int y,
+                          int font_size,
+                          int max_width,
+                          int line_height,
+                          int max_lines,
+                          Color color) {
+    const char* cursor = text;
+    int lines = 0;
+
+    if (text == NULL || max_width <= 0 || max_lines <= 0) {
+        return 0;
+    }
+
+    if (line_height <= 0) {
+        line_height = font_size + 6;
+    }
+
+    while (*cursor != '\0' && lines < max_lines) {
+        char line[256];
+        int len = 0;
+        int next_len = 0;
+        int last_space = -1;
+
+        while (cursor[next_len] != '\0' && cursor[next_len] != '\n' && len < (int)sizeof(line) - 1) {
+            line[len] = cursor[next_len];
+            line[len + 1] = '\0';
+
+            if (line[len] == ' ') {
+                last_space = len;
+            }
+
+            if (gui_measure_text(line, font_size) > max_width) {
+                if (last_space >= 0) {
+                    len = last_space;
+                    next_len = last_space + 1;
+                }
+                break;
+            }
+
+            len++;
+            next_len++;
+        }
+
+        while (len > 0 && line[len - 1] == ' ') {
+            len--;
+        }
+        line[len] = '\0';
+
+        if (len == 0 && cursor[0] != '\0' && cursor[0] != '\n') {
+            line[0] = cursor[0];
+            line[1] = '\0';
+            next_len = 1;
+        }
+
+        if (line[0] != '\0') {
+            gui_draw_text(line, x, y + lines * line_height, font_size, color);
+            lines++;
+        }
+
+        cursor += next_len;
+        while (*cursor == ' ') {
+            cursor++;
+        }
+        if (*cursor == '\n') {
+            cursor++;
+        }
+    }
+
+    return lines;
+}
+
+/* Starts one async online action and opens loading overlay. */
+static void start_online_loading(ChessApp* app,
+                                 OnlineAsyncAction action,
+                                 const char* title,
+                                 const char* text,
+                                 int match_index,
+                                 const char* invite_code,
+                                 bool reconnect_is_host) {
+    if (app == NULL || app->online_loading || action == ONLINE_ASYNC_NONE) {
+        return;
+    }
+
+    app_clear_network_error(app);
+    app->online_loading = true;
+    app->online_loading_action = action;
+    app->online_loading_match_index = match_index;
+    app->online_loading_reconnect_host = reconnect_is_host;
+
+    if (invite_code != NULL) {
+        strncpy(app->online_loading_code, invite_code, INVITE_CODE_LEN);
+    } else {
+        app->online_loading_code[0] = '\0';
+    }
+    app->online_loading_code[INVITE_CODE_LEN] = '\0';
+
+    strncpy(app->online_loading_title,
+            (title != NULL && title[0] != '\0') ? title : "Loading",
+            sizeof(app->online_loading_title) - 1);
+    app->online_loading_title[sizeof(app->online_loading_title) - 1] = '\0';
+
+    strncpy(app->online_loading_text,
+            (text != NULL && text[0] != '\0') ? text : "Please wait...",
+            sizeof(app->online_loading_text) - 1);
+    app->online_loading_text[sizeof(app->online_loading_text) - 1] = '\0';
+}
+
+/* Draws modal spinner/loading panel while background online task runs. */
+static void draw_online_loading_dialog(const ChessApp* app) {
+    const GuiPalette* palette = gui_palette();
+    float sw;
+    float sh;
+    float panel_w;
+    float panel_h = 236.0f;
+    Rectangle panel;
+    Vector2 spinner_center;
+    float t;
+    float start_deg;
+    int dots_count;
+    char dots[4];
+    char line[220];
+
+    if (app == NULL || !app->online_loading) {
+        return;
+    }
+
+    sw = (float)GetScreenWidth();
+    sh = (float)GetScreenHeight();
+    panel_w = sw * 0.42f;
+
+    if (panel_w < 430.0f) {
+        panel_w = 430.0f;
+    }
+    if (panel_w > 620.0f) {
+        panel_w = 620.0f;
+    }
+
+    panel = (Rectangle){
+        sw * 0.5f - panel_w * 0.5f,
+        sh * 0.5f - panel_h * 0.5f,
+        panel_w,
+        panel_h
+    };
+
+    DrawRectangle(0, 0, (int)sw, (int)sh, Fade(BLACK, 0.56f));
+    DrawRectangleRounded(panel, 0.09f, 8, Fade(palette->panel, 0.98f));
+    DrawRectangleRoundedLinesEx(panel, 0.09f, 8, 1.5f, palette->panel_border);
+
+    spinner_center = (Vector2){panel.x + 54.0f, panel.y + panel.height * 0.5f + 6.0f};
+    t = (float)GetTime();
+    start_deg = fmodf(t * 220.0f, 360.0f);
+    DrawRing(spinner_center, 18.0f, 26.0f, 0.0f, 360.0f, 48, Fade(palette->panel_border, 0.45f));
+    DrawRing(spinner_center, 18.0f, 26.0f, start_deg, start_deg + 265.0f, 48, palette->accent);
+
+    draw_text_fit(app->online_loading_title[0] != '\0' ? app->online_loading_title : "Loading",
+                  (int)panel.x + 96,
+                  (int)panel.y + 38,
+                  34,
+                  (int)panel.width - 118,
+                  palette->text_primary);
+
+    dots_count = ((int)(t * 3.0f)) % 4;
+    for (int i = 0; i < 3; ++i) {
+        dots[i] = (i < dots_count) ? '.' : '\0';
+    }
+    dots[3] = '\0';
+
+    snprintf(line,
+             sizeof(line),
+             "%s%s",
+             app->online_loading_text[0] != '\0' ? app->online_loading_text : "Please wait",
+             dots);
+    draw_text_wrap(line,
+                   (int)panel.x + 96,
+                   (int)panel.y + 96,
+                   21,
+                   (int)panel.width - 124,
+                   25,
+                   4,
+                   palette->text_secondary);
+}
+
 /* Draws a rounded status/info block used in lobby subviews. */
 static void draw_status_box(Rectangle rect, const char* title, const char* text) {
     const GuiPalette* palette = gui_palette();
@@ -74,6 +260,57 @@ static const char* focused_status(const ChessApp* app) {
     return app->lobby_status;
 }
 
+/* Draws global network error popup while user stays inside online screen. */
+static void draw_network_error_dialog(ChessApp* app) {
+    const GuiPalette* palette = gui_palette();
+    float sw = (float)GetScreenWidth();
+    float sh = (float)GetScreenHeight();
+    float panel_w = sw * 0.44f;
+    float panel_h = 264.0f;
+    Rectangle panel;
+    Rectangle ok_btn;
+
+    if (panel_w < 430.0f) {
+        panel_w = 430.0f;
+    }
+    if (panel_w > 680.0f) {
+        panel_w = 680.0f;
+    }
+
+    panel = (Rectangle){
+        sw * 0.5f - panel_w * 0.5f,
+        sh * 0.5f - panel_h * 0.5f,
+        panel_w,
+        panel_h
+    };
+    ok_btn = (Rectangle){panel.x + panel.width - 146.0f, panel.y + panel.height - 58.0f, 120.0f, 40.0f};
+
+    DrawRectangle(0, 0, (int)sw, (int)sh, Fade(BLACK, 0.52f));
+    DrawRectangleRounded(panel, 0.08f, 8, Fade(palette->panel, 0.98f));
+    DrawRectangleRoundedLinesEx(panel, 0.08f, 8, 1.4f, palette->panel_border);
+
+    draw_text_fit(app->network_error_popup_title[0] != '\0' ? app->network_error_popup_title : "Network Error",
+                  (int)panel.x + 24,
+                  (int)panel.y + 24,
+                  34,
+                  (int)panel.width - 48,
+                  palette->text_primary);
+    draw_text_wrap(app->network_error_popup_text[0] != '\0'
+                       ? app->network_error_popup_text
+                       : "Unknown network error.",
+                   (int)panel.x + 24,
+                   (int)panel.y + 84,
+                   20,
+                   (int)panel.width - 48,
+                   24,
+                   6,
+                   palette->text_secondary);
+
+    if (gui_button(ok_btn, "OK")) {
+        app_clear_network_error(app);
+    }
+}
+
 /* Opens one match in lobby context and syncs shared app runtime fields. */
 static void focus_match(ChessApp* app, int index, LobbyView view) {
     const OnlineMatch* match = app_online_get_const(app, index);
@@ -91,7 +328,7 @@ static void focus_match(ChessApp* app, int index, LobbyView view) {
 }
 
 /* Draws list of active sessions sorted by latest start timestamp. */
-static void draw_active_matches(ChessApp* app, Rectangle list_rect) {
+static void draw_active_matches(ChessApp* app, Rectangle list_rect, bool input_locked) {
     const GuiPalette* palette = gui_palette();
     int sorted[ONLINE_MATCH_MAX];
     int count = 0;
@@ -197,7 +434,22 @@ static void draw_active_matches(ChessApp* app, Rectangle list_rect) {
                  match->is_host ? "Host" : "Guest");
         draw_text_fit(line, (int)row.x + 12, (int)row.y + 56, 18, (int)row.width - 260, palette->text_secondary);
 
-        if (gui_button(open_btn, match->in_game ? "Resume" : "Open")) {
+        if (!input_locked &&
+            gui_button(open_btn,
+                       (!match->connected && match->invite_code[0] != '\0')
+                           ? "Reconnect"
+                           : (match->in_game ? "Resume" : "Open"))) {
+            if (!match->connected && match->invite_code[0] != '\0') {
+                start_online_loading(app,
+                                     ONLINE_ASYNC_RECONNECT_ROOM,
+                                     "Reconnecting Match",
+                                     "Restoring room connection",
+                                     slot_index,
+                                     match->invite_code,
+                                     match->is_host);
+                return;
+            }
+
             if (match->in_game) {
                 app_online_switch_to_match(app, slot_index, true);
                 return;
@@ -206,7 +458,7 @@ static void draw_active_matches(ChessApp* app, Rectangle list_rect) {
             return;
         }
 
-        if (gui_button(close_btn, "Close")) {
+        if (!input_locked && gui_button(close_btn, "Close")) {
             app_online_close_match(app, slot_index, true);
             snprintf(app->lobby_status, sizeof(app->lobby_status), "Match closed.");
             return;
@@ -224,6 +476,7 @@ void gui_screen_lobby(struct ChessApp* app) {
     Rectangle panel;
     Rectangle back_btn;
     Rectangle card;
+    bool input_locked = app->online_loading || app->network_error_popup_open;
 
     if (panel_w < 780.0f) {
         panel_w = 780.0f;
@@ -274,25 +527,42 @@ void gui_screen_lobby(struct ChessApp* app) {
     }
 
     back_btn = (Rectangle){panel.x + panel.width - 176.0f, panel.y + 24.0f, 146.0f, 50.0f};
-    if (gui_button(back_btn, "Back")) {
+    if (!input_locked && gui_button(back_btn, "Back")) {
         app->screen = SCREEN_MENU;
+        if (app->network_error_popup_open) {
+            draw_network_error_dialog(app);
+        }
         return;
     }
 
     DrawRectangleRounded(card, 0.08f, 8, Fade(palette->panel_alt, 0.95f));
     DrawRectangleRoundedLinesEx(card, 0.08f, 8, 1.0f, palette->panel_border);
 
+    if (app->network_error_popup_open) {
+        draw_network_error_dialog(app);
+        return;
+    }
+
     if (app->lobby_view == LOBBY_VIEW_ACTIVE) {
         Rectangle list_rect = {card.x + 28.0f, card.y + 78.0f, card.width - 56.0f, card.height - 160.0f};
         Rectangle lobby_btn = {card.x + 28.0f, card.y + card.height - 68.0f, 220.0f, 42.0f};
 
         gui_draw_text("Active Games", (int)card.x + 28, (int)card.y + 30, 34, palette->text_primary);
-        draw_active_matches(app, list_rect);
+        draw_active_matches(app, list_rect, input_locked);
 
-        if (gui_button(lobby_btn, "Open Online Lobby")) {
+        if (!input_locked && gui_button(lobby_btn, "Open Online Lobby")) {
             app->lobby_view = LOBBY_VIEW_HOME;
             app->lobby_focus_match = -1;
+            if (app->network_error_popup_open) {
+                draw_network_error_dialog(app);
+            }
             return;
+        }
+        if (app->network_error_popup_open) {
+            draw_network_error_dialog(app);
+        }
+        if (app->online_loading) {
+            draw_online_loading_dialog(app);
         }
         return;
     }
@@ -305,7 +575,7 @@ void gui_screen_lobby(struct ChessApp* app) {
 
         gui_draw_text("Choose one option", (int)card.x + 36, (int)card.y + 38, 34, palette->text_primary);
 
-        if (gui_button(join_btn, "Join Game")) {
+        if (!input_locked && gui_button(join_btn, "Join Game")) {
             app->lobby_view = LOBBY_VIEW_JOIN;
             app->lobby_focus_match = -1;
             app->lobby_input[0] = '\0';
@@ -313,24 +583,32 @@ void gui_screen_lobby(struct ChessApp* app) {
             snprintf(app->lobby_status, sizeof(app->lobby_status), "Enter invite code and press Join.");
         }
 
-        if (gui_button(host_btn, "Host Game")) {
-            int idx = app_online_create_host(app, app->online_name);
-            if (idx >= 0) {
-                focus_match(app, idx, LOBBY_VIEW_HOST);
-            } else {
-                snprintf(app->lobby_status,
-                         sizeof(app->lobby_status),
-                         "Could not create host room (limit reached or network error).");
-            }
+        if (!input_locked && gui_button(host_btn, "Host Game")) {
+            start_online_loading(app,
+                                 ONLINE_ASYNC_HOST_ROOM,
+                                 "Creating Room",
+                                 "Preparing your host room",
+                                 -1,
+                                 NULL,
+                                 false);
         }
 
-        if (gui_button(active_btn, "Open Active Games")) {
+        if (!input_locked && gui_button(active_btn, "Open Active Games")) {
             app->lobby_view = LOBBY_VIEW_ACTIVE;
             app->lobby_focus_match = -1;
+            if (app->network_error_popup_open) {
+                draw_network_error_dialog(app);
+            }
             return;
         }
 
         draw_status_box(status_box, "Status", app->lobby_status);
+        if (app->network_error_popup_open) {
+            draw_network_error_dialog(app);
+        }
+        if (app->online_loading) {
+            draw_online_loading_dialog(app);
+        }
         return;
     }
 
@@ -350,32 +628,33 @@ void gui_screen_lobby(struct ChessApp* app) {
 
         gui_draw_text("Join Game", (int)card.x + 36, (int)card.y + 36, 34, palette->text_primary);
 
-        if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) || IsMouseButtonPressed(MOUSE_RIGHT_BUTTON)) {
+        if (!input_locked &&
+            (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) || IsMouseButtonPressed(MOUSE_RIGHT_BUTTON))) {
             app->lobby_input_active = CheckCollisionPointRec(GetMousePosition(), input_box);
         }
-        gui_input_box(input_box, app->lobby_input, INVITE_CODE_LEN + 1, app->lobby_input_active);
+        gui_input_box(input_box, app->lobby_input, INVITE_CODE_LEN + 1, app->lobby_input_active && !input_locked);
 
-        if (gui_button(join_btn, "Join")) {
+        if (!input_locked && gui_button(join_btn, "Join")) {
             if (!matchmaker_is_valid_code(app->lobby_input)) {
                 snprintf(app->lobby_status, sizeof(app->lobby_status), "Invite code is invalid.");
             } else {
-                int idx = app_online_create_join(app, app->online_name, app->lobby_input);
-                if (idx >= 0) {
-                    focus_match(app, idx, LOBBY_VIEW_JOIN);
-                } else {
-                    snprintf(app->lobby_status,
-                             sizeof(app->lobby_status),
-                             "Could not create join session (limit reached or network error).");
-                }
+                start_online_loading(app,
+                                     ONLINE_ASYNC_JOIN_ROOM,
+                                     "Joining Room",
+                                     "Connecting to room",
+                                     -1,
+                                     app->lobby_input,
+                                     false);
             }
         }
 
         if (focus != NULL && focus->connected && !focus->in_game) {
             const char* ready_label = focus->local_ready ? "Ready (On)" : "Ready";
 
-            if (gui_button(ready_btn, ready_label)) {
+            if (!input_locked && gui_button(ready_btn, ready_label)) {
                 bool next_ready = !focus->local_ready;
                 if (!app_online_send_ready(app, app->lobby_focus_match, next_ready)) {
+                    app_show_network_error(app, "Online Error", network_last_error());
                     snprintf(app->lobby_status, sizeof(app->lobby_status), "Failed to update ready status.");
                 } else {
                     snprintf(app->lobby_status,
@@ -390,8 +669,11 @@ void gui_screen_lobby(struct ChessApp* app) {
             gui_draw_text("Ready", (int)ready_btn.x + 24, (int)ready_btn.y + 14, 24, palette->text_secondary);
         }
 
-        if (focus != NULL && focus->in_game && gui_button(open_btn, "Open Match")) {
+        if (!input_locked && focus != NULL && focus->in_game && gui_button(open_btn, "Open Match")) {
             app_online_switch_to_match(app, app->lobby_focus_match, true);
+            if (app->network_error_popup_open) {
+                draw_network_error_dialog(app);
+            }
             return;
         } else if (focus == NULL || !focus->in_game) {
             DrawRectangleRounded(open_btn, 0.20f, 10, Fade(palette->panel, 0.85f));
@@ -399,13 +681,22 @@ void gui_screen_lobby(struct ChessApp* app) {
             gui_draw_text("Open Match", (int)open_btn.x + 24, (int)open_btn.y + 14, 24, palette->text_secondary);
         }
 
-        if (gui_button(mode_btn, "Change Mode")) {
+        if (!input_locked && gui_button(mode_btn, "Change Mode")) {
             app->lobby_view = LOBBY_VIEW_HOME;
             app->lobby_focus_match = -1;
+            if (app->network_error_popup_open) {
+                draw_network_error_dialog(app);
+            }
             return;
         }
 
         draw_status_box(status_box, "Status", focused_status(app));
+        if (app->network_error_popup_open) {
+            draw_network_error_dialog(app);
+        }
+        if (app->online_loading) {
+            draw_online_loading_dialog(app);
+        }
         return;
     }
 
@@ -424,6 +715,9 @@ void gui_screen_lobby(struct ChessApp* app) {
         if (focus == NULL) {
             app->lobby_view = LOBBY_VIEW_HOME;
             app->lobby_focus_match = -1;
+            if (app->network_error_popup_open) {
+                draw_network_error_dialog(app);
+            }
             return;
         }
 
@@ -446,7 +740,7 @@ void gui_screen_lobby(struct ChessApp* app) {
         gui_draw_text("Invite Code", (int)code_box.x + 14, (int)code_box.y + 8, 22, palette->text_secondary);
         gui_draw_text(focus->invite_code, (int)code_box.x + 14, (int)code_box.y + 36, 31, palette->accent);
 
-        if (gui_button(copy_btn, copy_label)) {
+        if (!input_locked && gui_button(copy_btn, copy_label)) {
             SetClipboardText(focus->invite_code);
             app->lobby_copy_feedback = true;
             app->lobby_copy_feedback_timer = 1.6f;
@@ -463,26 +757,41 @@ void gui_screen_lobby(struct ChessApp* app) {
                  focus->opponent_name[0] != '\0' ? focus->opponent_name : "Waiting...");
         gui_draw_text(opp_line, (int)room_box.x + 14, (int)room_box.y + 62, 22, palette->text_secondary);
 
-        if (gui_button(start_btn, "Start Game")) {
+        if (!input_locked && gui_button(start_btn, "Start Game")) {
             if (!focus->connected) {
                 snprintf(app->lobby_status, sizeof(app->lobby_status), "Need 2 players in room first.");
             } else if (!focus->peer_ready) {
                 snprintf(app->lobby_status, sizeof(app->lobby_status), "Opponent must press Ready first.");
             } else if (!app_online_send_start(app, app->lobby_focus_match)) {
+                app_show_network_error(app, "Online Error", network_last_error());
                 snprintf(app->lobby_status, sizeof(app->lobby_status), "Could not send start packet.");
             } else {
                 app_online_mark_started(app, app->lobby_focus_match);
                 app_online_switch_to_match(app, app->lobby_focus_match, true);
+                if (app->network_error_popup_open) {
+                    draw_network_error_dialog(app);
+                }
                 return;
             }
         }
 
-        if (gui_button(mode_btn, "Change Mode")) {
+        if (!input_locked && gui_button(mode_btn, "Change Mode")) {
             app->lobby_view = LOBBY_VIEW_HOME;
             app->lobby_focus_match = -1;
+            if (app->network_error_popup_open) {
+                draw_network_error_dialog(app);
+            }
             return;
         }
 
         draw_status_box(status_box, "Status", focused_status(app));
+    }
+
+    if (app->network_error_popup_open) {
+        draw_network_error_dialog(app);
+    }
+
+    if (app->online_loading) {
+        draw_online_loading_dialog(app);
     }
 }

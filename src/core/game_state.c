@@ -10,6 +10,39 @@
 /* Default local profile persistence file. */
 static const char* PROFILE_PATH = "profile.dat";
 static const char* SETTINGS_PATH = "settings.dat";
+static const char* ONLINE_SESSIONS_PATH = "online_matches.dat";
+
+#define ONLINE_SESSIONS_MAGIC 0x43484F4EU /* CHON */
+#define ONLINE_SESSIONS_VERSION 1U
+
+typedef struct PersistedOnlineHeader {
+    uint32_t magic;
+    uint32_t version;
+    uint32_t count;
+} PersistedOnlineHeader;
+
+typedef struct PersistedOnlineMatch {
+    uint8_t used;
+    uint8_t in_game;
+    uint8_t is_host;
+    uint8_t local_ready;
+    uint8_t peer_ready;
+    uint8_t local_side;
+    uint8_t game_over;
+    uint8_t reserved_a;
+    uint8_t reserved_b;
+    char invite_code[INVITE_CODE_LEN + 1];
+    char opponent_name[PLAYER_NAME_MAX + 1];
+    char status[128];
+    char started_at[32];
+    uint64_t started_epoch;
+    Position position;
+    int32_t last_move_from;
+    int32_t last_move_to;
+    int32_t move_log_count;
+    int32_t move_log_scroll;
+    char move_log[MOVE_LOG_MAX][64];
+} PersistedOnlineMatch;
 
 /* Clamps AI difficulty percentage into safe 0..100 range. */
 static int clamp_difficulty_percent(int value) {
@@ -114,6 +147,16 @@ static bool online_slot_valid(const ChessApp* app, int index) {
         return false;
     }
     return app->online_matches[index].used;
+}
+
+/* Transfers ownership of one network client object into destination slot. */
+static void take_network_client(NetworkClient* dest, NetworkClient* src) {
+    if (dest == NULL || src == NULL) {
+        return;
+    }
+
+    *dest = *src;
+    memset(src, 0, sizeof(*src));
 }
 
 /* Clears/initializes one online match object and optionally shuts its socket. */
@@ -401,6 +444,172 @@ static void load_settings(ChessApp* app) {
     }
 }
 
+/* Persists online session slots for resume-after-restart UX. */
+static bool save_online_sessions_internal(const ChessApp* app) {
+    FILE* file;
+    PersistedOnlineHeader header;
+    PersistedOnlineMatch records[ONLINE_MATCH_MAX];
+
+    if (app == NULL) {
+        return false;
+    }
+
+    memset(records, 0, sizeof(records));
+
+    for (int i = 0; i < ONLINE_MATCH_MAX; ++i) {
+        const OnlineMatch* match = &app->online_matches[i];
+        PersistedOnlineMatch* rec = &records[i];
+
+        rec->used = match->used ? 1U : 0U;
+        rec->in_game = match->in_game ? 1U : 0U;
+        rec->is_host = match->is_host ? 1U : 0U;
+        rec->local_ready = match->local_ready ? 1U : 0U;
+        rec->peer_ready = match->peer_ready ? 1U : 0U;
+        rec->local_side = (uint8_t)match->local_side;
+        rec->game_over = match->game_over ? 1U : 0U;
+
+        strncpy(rec->invite_code, match->invite_code, INVITE_CODE_LEN);
+        rec->invite_code[INVITE_CODE_LEN] = '\0';
+        strncpy(rec->opponent_name, match->opponent_name, PLAYER_NAME_MAX);
+        rec->opponent_name[PLAYER_NAME_MAX] = '\0';
+        strncpy(rec->status, match->status, sizeof(rec->status) - 1);
+        rec->status[sizeof(rec->status) - 1] = '\0';
+        strncpy(rec->started_at, match->started_at, sizeof(rec->started_at) - 1);
+        rec->started_at[sizeof(rec->started_at) - 1] = '\0';
+
+        rec->started_epoch = match->started_epoch;
+        rec->position = match->position;
+        rec->last_move_from = (int32_t)match->last_move_from;
+        rec->last_move_to = (int32_t)match->last_move_to;
+        rec->move_log_count = (int32_t)match->move_log_count;
+        rec->move_log_scroll = (int32_t)match->move_log_scroll;
+
+        if (rec->move_log_count < 0) {
+            rec->move_log_count = 0;
+        }
+        if (rec->move_log_count > MOVE_LOG_MAX) {
+            rec->move_log_count = MOVE_LOG_MAX;
+        }
+        if (rec->move_log_scroll < 0) {
+            rec->move_log_scroll = 0;
+        }
+        if (rec->move_log_scroll > rec->move_log_count) {
+            rec->move_log_scroll = rec->move_log_count;
+        }
+
+        for (int m = 0; m < rec->move_log_count; ++m) {
+            strncpy(rec->move_log[m], match->move_log[m], sizeof(rec->move_log[m]) - 1);
+            rec->move_log[m][sizeof(rec->move_log[m]) - 1] = '\0';
+        }
+    }
+
+    file = fopen(ONLINE_SESSIONS_PATH, "wb");
+    if (file == NULL) {
+        return false;
+    }
+
+    header.magic = ONLINE_SESSIONS_MAGIC;
+    header.version = ONLINE_SESSIONS_VERSION;
+    header.count = ONLINE_MATCH_MAX;
+
+    if (fwrite(&header, sizeof(header), 1, file) != 1 ||
+        fwrite(records, sizeof(records), 1, file) != 1) {
+        fclose(file);
+        return false;
+    }
+
+    fclose(file);
+    return true;
+}
+
+/* Loads persisted online sessions and marks them disconnected for reconnect. */
+static void load_online_sessions_internal(ChessApp* app) {
+    FILE* file;
+    PersistedOnlineHeader header;
+    PersistedOnlineMatch records[ONLINE_MATCH_MAX];
+
+    if (app == NULL) {
+        return;
+    }
+
+    file = fopen(ONLINE_SESSIONS_PATH, "rb");
+    if (file == NULL) {
+        return;
+    }
+
+    if (fread(&header, sizeof(header), 1, file) != 1 ||
+        header.magic != ONLINE_SESSIONS_MAGIC ||
+        header.version != ONLINE_SESSIONS_VERSION ||
+        header.count != ONLINE_MATCH_MAX ||
+        fread(records, sizeof(records), 1, file) != 1) {
+        fclose(file);
+        return;
+    }
+
+    fclose(file);
+
+    for (int i = 0; i < ONLINE_MATCH_MAX; ++i) {
+        OnlineMatch* match = &app->online_matches[i];
+        const PersistedOnlineMatch* rec = &records[i];
+
+        if (!rec->used) {
+            memset(match, 0, sizeof(*match));
+            continue;
+        }
+
+        memset(match, 0, sizeof(*match));
+        match->used = true;
+        match->in_game = (rec->in_game != 0U);
+        match->connected = false;
+        match->is_host = (rec->is_host != 0U);
+        match->local_ready = (rec->local_ready != 0U);
+        match->peer_ready = (rec->peer_ready != 0U);
+        match->local_side = (rec->local_side == SIDE_BLACK) ? SIDE_BLACK : SIDE_WHITE;
+        match->game_over = (rec->game_over != 0U);
+
+        strncpy(match->invite_code, rec->invite_code, INVITE_CODE_LEN);
+        match->invite_code[INVITE_CODE_LEN] = '\0';
+        strncpy(match->opponent_name, rec->opponent_name, PLAYER_NAME_MAX);
+        match->opponent_name[PLAYER_NAME_MAX] = '\0';
+        strncpy(match->status, rec->status, sizeof(match->status) - 1);
+        match->status[sizeof(match->status) - 1] = '\0';
+        strncpy(match->started_at, rec->started_at, sizeof(match->started_at) - 1);
+        match->started_at[sizeof(match->started_at) - 1] = '\0';
+        match->started_epoch = rec->started_epoch;
+
+        match->position = rec->position;
+        match->last_move_from = rec->last_move_from;
+        match->last_move_to = rec->last_move_to;
+        match->move_log_count = rec->move_log_count;
+        match->move_log_scroll = rec->move_log_scroll;
+
+        if (match->move_log_count < 0) {
+            match->move_log_count = 0;
+        }
+        if (match->move_log_count > MOVE_LOG_MAX) {
+            match->move_log_count = MOVE_LOG_MAX;
+        }
+        if (match->move_log_scroll < 0) {
+            match->move_log_scroll = 0;
+        }
+        if (match->move_log_scroll > match->move_log_count) {
+            match->move_log_scroll = match->move_log_count;
+        }
+
+        for (int m = 0; m < match->move_log_count; ++m) {
+            strncpy(match->move_log[m], rec->move_log[m], sizeof(match->move_log[m]) - 1);
+            match->move_log[m][sizeof(match->move_log[m]) - 1] = '\0';
+        }
+
+        if (match->status[0] == '\0') {
+            strncpy(match->status,
+                    "Saved session loaded. Open and reconnect when online.",
+                    sizeof(match->status) - 1);
+            match->status[sizeof(match->status) - 1] = '\0';
+        }
+    }
+}
+
 /* Initializes a profile object with safe defaults. */
 static void set_default_profile(Profile* profile) {
     memset(profile, 0, sizeof(*profile));
@@ -454,6 +663,39 @@ bool app_online_name_is_set(const ChessApp* app) {
     return app->online_name[0] != '\0';
 }
 
+/* Persists active online sessions to local storage. */
+bool app_online_save_sessions(const ChessApp* app) {
+    return save_online_sessions_internal(app);
+}
+
+/* Opens one global network error popup with title and detail text. */
+void app_show_network_error(ChessApp* app, const char* title, const char* message) {
+    if (app == NULL) {
+        return;
+    }
+
+    app->network_error_popup_open = true;
+    strncpy(app->network_error_popup_title,
+            (title != NULL && title[0] != '\0') ? title : "Network Error",
+            sizeof(app->network_error_popup_title) - 1);
+    app->network_error_popup_title[sizeof(app->network_error_popup_title) - 1] = '\0';
+    strncpy(app->network_error_popup_text,
+            (message != NULL && message[0] != '\0') ? message : "Unknown network failure.",
+            sizeof(app->network_error_popup_text) - 1);
+    app->network_error_popup_text[sizeof(app->network_error_popup_text) - 1] = '\0';
+}
+
+/* Closes currently shown network error popup. */
+void app_clear_network_error(ChessApp* app) {
+    if (app == NULL) {
+        return;
+    }
+
+    app->network_error_popup_open = false;
+    app->network_error_popup_title[0] = '\0';
+    app->network_error_popup_text[0] = '\0';
+}
+
 /* Saves current on-screen online match board/log into persistent slot. */
 void app_online_store_current_match(ChessApp* app) {
     OnlineMatch* match;
@@ -468,6 +710,7 @@ void app_online_store_current_match(ChessApp* app) {
     }
 
     sync_match_from_app(app, match);
+    save_online_sessions_internal(app);
 }
 
 /* Switches app context to another online match slot (play or lobby). */
@@ -489,6 +732,195 @@ bool app_online_switch_to_match(ChessApp* app, int index, bool open_play_screen)
 
     app->current_online_match = index;
     sync_app_from_match(app, match, open_play_screen);
+    return true;
+}
+
+/* Reconnects one persisted/disconnected online match slot to relay server. */
+bool app_online_reconnect_match(ChessApp* app, int index) {
+    OnlineMatch* match;
+
+    if (app == NULL || !app_online_name_is_set(app)) {
+        return false;
+    }
+
+    match = app_online_get(app, index);
+    if (match == NULL || !match->used || match->invite_code[0] == '\0') {
+        return false;
+    }
+    if (match->network.initialized) {
+        network_client_shutdown(&match->network);
+    }
+
+    if (!network_client_init(&match->network, 0)) {
+        return false;
+    }
+
+    if (match->is_host) {
+        if (!network_client_host_reconnect(&match->network, app->online_name, match->invite_code)) {
+            network_client_shutdown(&match->network);
+            return false;
+        }
+        match->connected = false;
+        strncpy(match->status,
+                "Reconnected as host. Waiting for opponent.",
+                sizeof(match->status) - 1);
+        match->status[sizeof(match->status) - 1] = '\0';
+    } else {
+        if (!network_client_join(&match->network, app->online_name, match->invite_code)) {
+            network_client_shutdown(&match->network);
+            return false;
+        }
+        match->connected = match->network.connected;
+        strncpy(match->status,
+                match->connected ? "Reconnected to room."
+                                 : "Reconnect request sent.",
+                sizeof(match->status) - 1);
+        match->status[sizeof(match->status) - 1] = '\0';
+    }
+
+    if (app->current_online_match == index) {
+        sync_app_from_match(app, match, false);
+    }
+
+    save_online_sessions_internal(app);
+    return true;
+}
+
+/* Attaches one pre-connected host client (built by async worker) into a slot. */
+int app_online_attach_host_client(ChessApp* app, NetworkClient* client, const char* invite_code) {
+    int slot;
+    OnlineMatch* match;
+
+    if (app == NULL || client == NULL || !client->initialized) {
+        return -1;
+    }
+
+    slot = online_find_free_slot(app);
+    if (slot < 0) {
+        return -1;
+    }
+
+    match = &app->online_matches[slot];
+    online_match_clear(match, false);
+    take_network_client(&match->network, client);
+
+    if (!match->network.initialized) {
+        return -1;
+    }
+
+    match->used = true;
+    match->in_game = false;
+    match->connected = false;
+    match->is_host = true;
+    match->local_ready = false;
+    match->peer_ready = false;
+    match->local_side = match->network.host_side;
+    strncpy(match->opponent_name, "Waiting...", PLAYER_NAME_MAX);
+    match->opponent_name[PLAYER_NAME_MAX] = '\0';
+
+    if (invite_code != NULL && invite_code[0] != '\0') {
+        strncpy(match->invite_code, invite_code, INVITE_CODE_LEN);
+    } else {
+        strncpy(match->invite_code, match->network.invite_code, INVITE_CODE_LEN);
+    }
+    match->invite_code[INVITE_CODE_LEN] = '\0';
+
+    strncpy(match->status, "Waiting for player to join room.", sizeof(match->status) - 1);
+    match->status[sizeof(match->status) - 1] = '\0';
+    timestamp_now(match->started_at, &match->started_epoch);
+    online_match_reset_board(match);
+    save_online_sessions_internal(app);
+
+    return slot;
+}
+
+/* Attaches one pre-connected join client (built by async worker) into a slot. */
+int app_online_attach_join_client(ChessApp* app, NetworkClient* client, const char* invite_code) {
+    int slot;
+    OnlineMatch* match;
+
+    if (app == NULL || client == NULL || !client->initialized || invite_code == NULL) {
+        return -1;
+    }
+    if (!matchmaker_is_valid_code(invite_code)) {
+        return -1;
+    }
+
+    slot = online_find_free_slot(app);
+    if (slot < 0) {
+        return -1;
+    }
+
+    match = &app->online_matches[slot];
+    online_match_clear(match, false);
+    take_network_client(&match->network, client);
+
+    if (!match->network.initialized) {
+        return -1;
+    }
+
+    match->used = true;
+    match->in_game = false;
+    match->connected = match->network.connected;
+    match->is_host = false;
+    match->local_ready = false;
+    match->peer_ready = false;
+    match->local_side = SIDE_BLACK;
+    strncpy(match->invite_code, invite_code, INVITE_CODE_LEN);
+    match->invite_code[INVITE_CODE_LEN] = '\0';
+    strncpy(match->opponent_name, "Host", PLAYER_NAME_MAX);
+    match->opponent_name[PLAYER_NAME_MAX] = '\0';
+    strncpy(match->status, "Join request sent.", sizeof(match->status) - 1);
+    match->status[sizeof(match->status) - 1] = '\0';
+    timestamp_now(match->started_at, &match->started_epoch);
+    online_match_reset_board(match);
+    save_online_sessions_internal(app);
+
+    return slot;
+}
+
+/* Replaces one existing match socket with async reconnect result. */
+bool app_online_attach_reconnect_client(ChessApp* app,
+                                        int index,
+                                        NetworkClient* client,
+                                        bool is_host_reconnect) {
+    OnlineMatch* match;
+
+    if (app == NULL || client == NULL || !client->initialized) {
+        return false;
+    }
+
+    match = app_online_get(app, index);
+    if (match == NULL || !match->used) {
+        return false;
+    }
+
+    if (match->network.initialized) {
+        network_client_shutdown(&match->network);
+    }
+
+    take_network_client(&match->network, client);
+    match->is_host = is_host_reconnect;
+
+    if (is_host_reconnect) {
+        match->connected = false;
+        strncpy(match->status,
+                "Reconnected as host. Waiting for opponent.",
+                sizeof(match->status) - 1);
+    } else {
+        match->connected = match->network.connected;
+        strncpy(match->status,
+                match->connected ? "Reconnected to room."
+                                 : "Reconnect request sent.",
+                sizeof(match->status) - 1);
+    }
+    match->status[sizeof(match->status) - 1] = '\0';
+
+    if (app->current_online_match == index) {
+        sync_app_from_match(app, match, false);
+    }
+
+    save_online_sessions_internal(app);
     return true;
 }
 
@@ -531,6 +963,7 @@ int app_online_create_host(ChessApp* app, const char* username) {
     match->status[sizeof(match->status) - 1] = '\0';
     timestamp_now(match->started_at, &match->started_epoch);
     online_match_reset_board(match);
+    save_online_sessions_internal(app);
 
     return slot;
 }
@@ -566,7 +999,7 @@ int app_online_create_join(ChessApp* app, const char* username, const char* invi
 
     match->used = true;
     match->in_game = false;
-    match->connected = false;
+    match->connected = match->network.connected;
     match->is_host = false;
     match->local_ready = false;
     match->peer_ready = false;
@@ -579,6 +1012,7 @@ int app_online_create_join(ChessApp* app, const char* username, const char* invi
     match->status[sizeof(match->status) - 1] = '\0';
     timestamp_now(match->started_at, &match->started_epoch);
     online_match_reset_board(match);
+    save_online_sessions_internal(app);
 
     return slot;
 }
@@ -622,7 +1056,6 @@ void app_online_mark_started(ChessApp* app, int index) {
     match->in_game = true;
     match->local_ready = false;
     match->peer_ready = false;
-    match->network.invite_code[0] = '\0';
     strncpy(match->status, "Match started.", sizeof(match->status) - 1);
     match->status[sizeof(match->status) - 1] = '\0';
     timestamp_now(match->started_at, &match->started_epoch);
@@ -631,6 +1064,7 @@ void app_online_mark_started(ChessApp* app, int index) {
     if (app->current_online_match == index) {
         sync_app_from_match(app, match, true);
     }
+    save_online_sessions_internal(app);
 }
 
 /* Closes one online slot and optionally notifies current peer with LEAVE. */
@@ -645,7 +1079,7 @@ void app_online_close_match(ChessApp* app, int index, bool notify_peer) {
     match = &app->online_matches[index];
     was_current = (app->current_online_match == index);
 
-    if (notify_peer && match->network.initialized && match->network.peer_addr_len > 0) {
+    if (notify_peer && match->network.initialized && match->network.relay_connected && match->connected) {
         network_client_send_leave(&match->network);
     }
 
@@ -676,6 +1110,8 @@ void app_online_close_match(ChessApp* app, int index, bool notify_peer) {
         app->online_leave_notice_title[0] = '\0';
         app->online_leave_notice_text[0] = '\0';
     }
+
+    save_online_sessions_internal(app);
 }
 
 /* Closes all active online slots. */
@@ -748,6 +1184,16 @@ void app_init(ChessApp* app) {
     app->online_leave_notice_match = -1;
     app->online_leave_notice_title[0] = '\0';
     app->online_leave_notice_text[0] = '\0';
+    app->network_error_popup_open = false;
+    app->network_error_popup_title[0] = '\0';
+    app->network_error_popup_text[0] = '\0';
+    app->online_loading = false;
+    app->online_loading_action = ONLINE_ASYNC_NONE;
+    app->online_loading_match_index = -1;
+    app->online_loading_reconnect_host = false;
+    app->online_loading_code[0] = '\0';
+    app->online_loading_title[0] = '\0';
+    app->online_loading_text[0] = '\0';
     app->current_online_match = -1;
     app->leave_confirm_open = false;
     app->exit_confirm_open = false;
@@ -757,6 +1203,8 @@ void app_init(ChessApp* app) {
     snprintf(app->lobby_status,
              sizeof(app->lobby_status),
              "Choose Host Game or Join Game.");
+
+    load_online_sessions_internal(app);
 }
 
 /* Starts a fresh game for the selected mode. */
@@ -877,6 +1325,7 @@ bool app_apply_move(ChessApp* app, Move move) {
                         sizeof(match->status) - 1);
                 match->status[sizeof(match->status) - 1] = '\0';
             }
+            save_online_sessions_internal(app);
         }
     }
 

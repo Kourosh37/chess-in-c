@@ -75,3 +75,15 @@ endif()
 if(WIN32)
     target_link_libraries(chess_app PRIVATE ws2_32 gdi32 winmm opengl32)
 endif()
+
+# ------------------------------------------------------------
+# Optional relay server executable (TCP room relay)
+# ------------------------------------------------------------
+add_executable(chess_relay_server
+    src/network/relay_server.c
+    src/network/matchmaker.c
+)
+target_include_directories(chess_relay_server PRIVATE include src/network)
+if(WIN32)
+    target_link_libraries(chess_relay_server PRIVATE ws2_32)
+endif()
