@@ -317,6 +317,7 @@ int run_main_loop(void) {
 
         BeginDrawing();
         SetMouseCursor(MOUSE_CURSOR_DEFAULT);
+        gui_widgets_begin_frame();
         gui_draw_background();
 
         if (app.screen == SCREEN_MENU) {
@@ -329,6 +330,7 @@ int run_main_loop(void) {
             gui_screen_settings(&app);
         }
 
+        gui_draw_input_overlays();
         EndDrawing();
 
         if (app.exit_requested) {

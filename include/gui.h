@@ -48,6 +48,8 @@ extern "C" {
 bool gui_button(Rectangle bounds, const char* label);
 bool gui_slider_float(Rectangle bounds, float* value, float min_value, float max_value);
 void gui_input_box(Rectangle bounds, char* buffer, int capacity, bool active);
+void gui_widgets_begin_frame(void);
+void gui_draw_input_overlays(void);
 bool gui_font_init(void);
 void gui_font_shutdown(void);
 void gui_draw_text(const char* text, int pos_x, int pos_y, int font_size, Color color);

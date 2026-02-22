@@ -25,6 +25,7 @@ typedef struct InputContextMenu {
 static InputContextMenu g_input_menu = {0};
 static char* g_selected_input_buffer = NULL;
 static float* g_active_slider_value = NULL;
+static bool g_input_box_used_this_frame = false;
 
 /* True when user currently has select-all state on this input buffer. */
 static bool input_has_selection(char* buffer) {
@@ -119,8 +120,8 @@ static void input_menu_open(char* buffer, int capacity) {
     g_input_menu.rect = (Rectangle){x, y, menu_w, menu_h};
 }
 
-/* Draws and handles input context menu interactions for the focused buffer. */
-static void input_menu_update(char* active_buffer) {
+/* Draws and handles input context menu interactions on top of all widgets. */
+static void input_menu_update(void) {
     const GuiPalette* palette = gui_palette();
     const char* labels[INPUT_MENU_COUNT] = {"Paste", "Copy", "Cut", "Select All", "Clear"};
     const float item_h = 31.0f;
@@ -128,7 +129,7 @@ static void input_menu_update(char* active_buffer) {
     Vector2 mouse = GetMousePosition();
     bool inside_menu;
 
-    if (!g_input_menu.open || g_input_menu.buffer != active_buffer) {
+    if (!g_input_menu.open || g_input_menu.buffer == NULL) {
         return;
     }
 
@@ -230,7 +231,8 @@ static Color brighten(Color color, int amount) {
 bool gui_button(Rectangle bounds, const char* label) {
     const GuiPalette* palette = gui_palette();
     Vector2 mouse = GetMousePosition();
-    bool hovered = CheckCollisionPointRec(mouse, bounds);
+    bool blocked_by_input_menu = g_input_menu.open && CheckCollisionPointRec(mouse, g_input_menu.rect);
+    bool hovered = !blocked_by_input_menu && CheckCollisionPointRec(mouse, bounds);
     bool key_activate = hovered && (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_SPACE));
     bool pressed = hovered && (IsMouseButtonDown(MOUSE_LEFT_BUTTON) || IsKeyDown(KEY_ENTER) || IsKeyDown(KEY_SPACE));
     bool clicked = (hovered && IsMouseButtonReleased(MOUSE_LEFT_BUTTON)) || key_activate;
@@ -404,6 +406,8 @@ void gui_input_box(Rectangle bounds, char* buffer, int capacity, bool active) {
     bool ctrl_down = IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL);
     bool has_selection = input_has_selection(buffer);
 
+    g_input_box_used_this_frame = true;
+
     DrawRectangleRounded(bounds, 0.12f, 8, bg);
     DrawRectangleRoundedLinesEx(bounds, 0.12f, 8, active ? 2.0f : 1.0f, border);
 
@@ -491,5 +495,17 @@ void gui_input_box(Rectangle bounds, char* buffer, int capacity, bool active) {
         DrawRectangle((int)(bounds.x + 12 + (float)text_w + 1), (int)bounds.y + 10, 2, 28, palette->text_primary);
     }
 
-    input_menu_update(buffer);
+}
+
+void gui_widgets_begin_frame(void) {
+    g_input_box_used_this_frame = false;
+}
+
+void gui_draw_input_overlays(void) {
+    if (!g_input_box_used_this_frame) {
+        g_input_menu.open = false;
+        return;
+    }
+
+    input_menu_update();
 }
