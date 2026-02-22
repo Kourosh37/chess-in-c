@@ -434,7 +434,7 @@ static bool ensure_board_surface(int size) {
             memset(&g_board_surface, 0, sizeof(g_board_surface));
             return false;
         }
-        SetTextureFilter(g_board_surface.texture, TEXTURE_FILTER_BILINEAR);
+        SetTextureFilter(g_board_surface.texture, TEXTURE_FILTER_TRILINEAR);
         g_board_surface_ready = true;
         g_board_surface_size = size;
     }
