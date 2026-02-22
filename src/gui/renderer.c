@@ -249,7 +249,8 @@ static bool draw_piece_texture(PieceType piece,
                                float size,
                                float alpha,
                                float rotation_deg,
-                               bool use_flipped_variant) {
+                               bool use_flipped_variant,
+                               float shadow_dir) {
     Texture2D tex;
     Rectangle src;
     Rectangle dst;
@@ -294,7 +295,7 @@ static bool draw_piece_texture(PieceType piece,
     src = (Rectangle){0.0f, 0.0f, (float)tex.width, (float)tex.height};
 
     DrawEllipse((int)center.x,
-                (int)(center.y + size * 0.34f),
+                (int)(center.y + size * 0.34f * shadow_dir),
                 (int)(size * 0.29f),
                 (int)(size * 0.075f),
                 with_alpha(BLACK, 0.16f * alpha));
@@ -545,7 +546,8 @@ static void draw_piece_shape(PieceType piece,
                              float size,
                              float alpha,
                              float rotation_deg,
-                             bool use_flipped_variant) {
+                             bool use_flipped_variant,
+                             float shadow_dir) {
     PieceDrawStyle style = piece_style(side, alpha);
     Color fill = adjust_color(style.fill, 0, alpha);
     Color fill_light = adjust_color(style.fill, 24, alpha);
@@ -559,7 +561,7 @@ static void draw_piece_shape(PieceType piece,
     Vector2 c = center;
     Vector2 shadow_offset = {2.2f, 2.0f};
 
-    if (draw_piece_texture(piece, side, center, size, alpha, rotation_deg, use_flipped_variant)) {
+    if (draw_piece_texture(piece, side, center, size, alpha, rotation_deg, use_flipped_variant, shadow_dir)) {
         return;
     }
 
@@ -924,7 +926,8 @@ static void draw_captured_group(const Position* pos, Rectangle rect, Side captur
                              icon_size,
                              0.95f,
                              0.0f,
-                             false);
+                             false,
+                             1.0f);
             x += icon_size + gap;
         }
     }
@@ -1072,12 +1075,14 @@ void gui_draw_board(const ChessApp* app) {
     float piece_size = layout.square_size * 0.88f;
     bool use_flipped_pieces;
     float piece_rotation;
+    float piece_shadow_dir;
 
     update_board_rotation(app);
     draw_card(info_card, with_alpha(palette->panel, 0.92f), palette->panel_border);
     draw_coordinate_frame(&layout);
     use_flipped_pieces = (board_target_side(app) == SIDE_BLACK);
     piece_rotation = 0.0f;
+    piece_shadow_dir = use_flipped_pieces ? -1.0f : 1.0f;
 
     if (!ensure_board_surface(board_px)) {
         return;
@@ -1136,7 +1141,14 @@ void gui_draw_board(const ChessApp* app) {
         }
 
         center = square_center(&board_surface_layout, square);
-        draw_piece_shape(piece, side, center, piece_size, 1.0f, piece_rotation, use_flipped_pieces);
+        draw_piece_shape(piece,
+                         side,
+                         center,
+                         piece_size,
+                         1.0f,
+                         piece_rotation,
+                         use_flipped_pieces,
+                         piece_shadow_dir);
     }
 
     if (app->move_animating) {
@@ -1163,7 +1175,8 @@ void gui_draw_board(const ChessApp* app) {
                          piece_size,
                          1.0f,
                          piece_rotation,
-                         use_flipped_pieces);
+                         use_flipped_pieces,
+                         piece_shadow_dir);
     }
 
     if (in_check && checked_king_square >= 0) {
