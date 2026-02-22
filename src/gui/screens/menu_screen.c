@@ -50,6 +50,80 @@ static void draw_text_fit(const char* text,
     gui_draw_text(buffer, x, y, font_size, color);
 }
 
+/* Draws wrapped text lines inside max width to avoid overflow in modal dialogs. */
+static int draw_text_wrap(const char* text,
+                          int x,
+                          int y,
+                          int font_size,
+                          int max_width,
+                          int line_height,
+                          int max_lines,
+                          Color color) {
+    const char* cursor = text;
+    int lines = 0;
+
+    if (text == NULL || max_width <= 0 || max_lines <= 0) {
+        return 0;
+    }
+
+    if (line_height <= 0) {
+        line_height = font_size + 6;
+    }
+
+    while (*cursor != '\0' && lines < max_lines) {
+        char line[256];
+        int len = 0;
+        int next_len = 0;
+        int last_space = -1;
+
+        while (cursor[next_len] != '\0' && cursor[next_len] != '\n' && len < (int)sizeof(line) - 1) {
+            line[len] = cursor[next_len];
+            line[len + 1] = '\0';
+
+            if (line[len] == ' ') {
+                last_space = len;
+            }
+
+            if (gui_measure_text(line, font_size) > max_width) {
+                if (last_space >= 0) {
+                    len = last_space;
+                    next_len = last_space + 1;
+                }
+                break;
+            }
+
+            len++;
+            next_len++;
+        }
+
+        while (len > 0 && line[len - 1] == ' ') {
+            len--;
+        }
+        line[len] = '\0';
+
+        if (len == 0 && cursor[0] != '\0' && cursor[0] != '\n') {
+            line[0] = cursor[0];
+            line[1] = '\0';
+            next_len = 1;
+        }
+
+        if (line[0] != '\0') {
+            gui_draw_text(line, x, y + lines * line_height, font_size, color);
+            lines++;
+        }
+
+        cursor += next_len;
+        while (*cursor == ' ') {
+            cursor++;
+        }
+        if (*cursor == '\n') {
+            cursor++;
+        }
+    }
+
+    return lines;
+}
+
 /* Opens in-place modal for online display name entry. */
 static void open_online_name_dialog(ChessApp* app) {
     if (app == NULL) {
@@ -69,7 +143,7 @@ static bool draw_online_name_dialog(ChessApp* app) {
     float sw = (float)GetScreenWidth();
     float sh = (float)GetScreenHeight();
     float panel_w = sw * 0.46f;
-    float panel_h = 256.0f;
+    float panel_h = 276.0f;
     Rectangle panel;
     Rectangle input_box;
     Rectangle cancel_btn;
@@ -97,11 +171,14 @@ static bool draw_online_name_dialog(ChessApp* app) {
     DrawRectangleRoundedLinesEx(panel, 0.08f, 8, 1.4f, palette->panel_border);
 
     gui_draw_text("Online Name", (int)panel.x + 24, (int)panel.y + 22, 36, palette->text_primary);
-    gui_draw_text("Enter your display name to use online mode.",
-                  (int)panel.x + 24,
-                  (int)panel.y + 70,
-                  20,
-                  palette->text_secondary);
+    draw_text_wrap("Enter your display name to use online mode.",
+                   (int)panel.x + 24,
+                   (int)panel.y + 70,
+                   20,
+                   (int)panel.width - 48,
+                   24,
+                   3,
+                   palette->text_secondary);
 
     if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) || IsMouseButtonPressed(MOUSE_RIGHT_BUTTON)) {
         app->online_name_input_active = CheckCollisionPointRec(GetMousePosition(), input_box);
@@ -109,7 +186,14 @@ static bool draw_online_name_dialog(ChessApp* app) {
     gui_input_box(input_box, app->online_name_input, PLAYER_NAME_MAX + 1, app->online_name_input_active);
 
     if (app->online_name_error[0] != '\0') {
-        gui_draw_text(app->online_name_error, (int)panel.x + 24, (int)panel.y + 166, 18, (Color){188, 42, 48, 255});
+        draw_text_wrap(app->online_name_error,
+                       (int)panel.x + 24,
+                       (int)panel.y + 166,
+                       18,
+                       (int)panel.width - 48,
+                       22,
+                       2,
+                       (Color){188, 42, 48, 255});
     }
 
     if (gui_button(cancel_btn, "Cancel")) {
@@ -144,10 +228,13 @@ static void draw_exit_confirm_dialog(ChessApp* app, int active_games) {
     float sw = (float)GetScreenWidth();
     float sh = (float)GetScreenHeight();
     float panel_w = sw * 0.44f;
-    float panel_h = (active_games > 0) ? 228.0f : 196.0f;
+    float panel_h = (active_games > 0) ? 258.0f : 228.0f;
     Rectangle panel;
     Rectangle cancel_btn;
     Rectangle exit_btn;
+    int text_x;
+    int text_w;
+    int text_y;
 
     if (panel_w < 420.0f) {
         panel_w = 420.0f;
@@ -168,18 +255,29 @@ static void draw_exit_confirm_dialog(ChessApp* app, int active_games) {
     DrawRectangleRoundedLinesEx(panel, 0.08f, 8, 1.4f, palette->panel_border);
 
     gui_draw_text("Exit Chess?", (int)panel.x + 20, (int)panel.y + 20, 36, palette->text_primary);
-    gui_draw_text("Are you sure you want to close the game?",
-                  (int)panel.x + 20,
-                  (int)panel.y + 76,
-                  22,
-                  palette->text_secondary);
+    text_x = (int)panel.x + 20;
+    text_w = (int)panel.width - 40;
+    text_y = (int)panel.y + 76;
+
+    text_y += draw_text_wrap("Are you sure you want to close the game?",
+                             text_x,
+                             text_y,
+                             22,
+                             text_w,
+                             26,
+                             3,
+                             palette->text_secondary) *
+              26;
 
     if (active_games > 0) {
-        gui_draw_text("Active online sessions will be closed.",
-                      (int)panel.x + 20,
-                      (int)panel.y + 108,
-                      20,
-                      palette->text_secondary);
+        draw_text_wrap("Active online sessions will be closed.",
+                       text_x,
+                       text_y + 6,
+                       20,
+                       text_w,
+                       24,
+                       3,
+                       palette->text_secondary);
     }
 
     cancel_btn = (Rectangle){panel.x + 20.0f, panel.y + panel.height - 64.0f, 140.0f, 44.0f};
@@ -208,7 +306,6 @@ void gui_screen_menu(struct ChessApp* app) {
     Rectangle single_btn;
     Rectangle local_btn;
     Rectangle online_btn;
-    Rectangle active_btn;
     Rectangle settings_btn;
     Rectangle exit_btn;
     int active_games = app_online_active_count(app);
@@ -260,9 +357,8 @@ void gui_screen_menu(struct ChessApp* app) {
     single_btn = (Rectangle){panel.x + 42.0f, panel.y + 184.0f, panel.width - 84.0f, 58.0f};
     local_btn = (Rectangle){panel.x + 42.0f, panel.y + 255.0f, panel.width - 84.0f, 58.0f};
     online_btn = (Rectangle){panel.x + 42.0f, panel.y + 326.0f, panel.width - 84.0f, 58.0f};
-    active_btn = (Rectangle){panel.x + 42.0f, panel.y + 397.0f, panel.width - 84.0f, 58.0f};
-    settings_btn = (Rectangle){panel.x + 42.0f, panel.y + 468.0f, panel.width - 84.0f, 58.0f};
-    exit_btn = (Rectangle){panel.x + 42.0f, panel.y + 539.0f, panel.width - 84.0f, 52.0f};
+    settings_btn = (Rectangle){panel.x + 42.0f, panel.y + 397.0f, panel.width - 84.0f, 58.0f};
+    exit_btn = (Rectangle){panel.x + 42.0f, panel.y + 468.0f, panel.width - 84.0f, 52.0f};
 
     if (!input_locked) {
         if (gui_button(single_btn, "Single Player")) {
@@ -293,17 +389,6 @@ void gui_screen_menu(struct ChessApp* app) {
             }
         }
 
-        if (gui_button(active_btn, "Active Games")) {
-            app->screen = SCREEN_LOBBY;
-            app->lobby_view = LOBBY_VIEW_ACTIVE;
-            app->lobby_focus_match = -1;
-            if (active_games > 0) {
-                snprintf(app->lobby_status, sizeof(app->lobby_status), "You have active online matches.");
-            } else {
-                snprintf(app->lobby_status, sizeof(app->lobby_status), "No active games.");
-            }
-        }
-
         if (gui_button(settings_btn, "Settings")) {
             app->screen = SCREEN_SETTINGS;
         }
@@ -311,22 +396,6 @@ void gui_screen_menu(struct ChessApp* app) {
         if (gui_button(exit_btn, "Exit")) {
             app->exit_confirm_open = true;
         }
-    }
-
-    {
-        char count_text[16];
-        int count_w;
-        Rectangle badge = {active_btn.x + active_btn.width - 76.0f, active_btn.y + 14.0f, 50.0f, 30.0f};
-
-        DrawRectangleRounded(badge, 0.35f, 8, Fade(palette->panel, 0.90f));
-        DrawRectangleRoundedLinesEx(badge, 0.35f, 8, 1.0f, palette->panel_border);
-        snprintf(count_text, sizeof(count_text), "%d", active_games);
-        count_w = gui_measure_text(count_text, 20);
-        gui_draw_text(count_text,
-                      (int)(badge.x + (badge.width - (float)count_w) * 0.5f),
-                      (int)badge.y + 6,
-                      20,
-                      palette->text_primary);
     }
 
     if (active_games > 0) {

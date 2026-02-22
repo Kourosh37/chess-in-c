@@ -669,6 +669,13 @@ void app_online_close_match(ChessApp* app, int index, bool notify_peer) {
             app->screen = SCREEN_MENU;
         }
     }
+
+    if (app->online_leave_notice_match == index) {
+        app->online_leave_notice_match = -1;
+        app->online_leave_notice_open = false;
+        app->online_leave_notice_title[0] = '\0';
+        app->online_leave_notice_text[0] = '\0';
+    }
 }
 
 /* Closes all active online slots. */
@@ -737,6 +744,10 @@ void app_init(ChessApp* app) {
     app->online_match_active = false;
     app->online_local_ready = false;
     app->online_peer_ready = false;
+    app->online_leave_notice_open = false;
+    app->online_leave_notice_match = -1;
+    app->online_leave_notice_title[0] = '\0';
+    app->online_leave_notice_text[0] = '\0';
     app->current_online_match = -1;
     app->leave_confirm_open = false;
     app->exit_confirm_open = false;

@@ -413,7 +413,6 @@ void gui_screen_lobby(struct ChessApp* app) {
         OnlineMatch* focus = app_online_get(app, app->lobby_focus_match);
         Rectangle code_box;
         Rectangle room_box;
-        Rectangle ready_btn;
         Rectangle start_btn;
         Rectangle mode_btn;
         Rectangle status_box;
@@ -430,8 +429,7 @@ void gui_screen_lobby(struct ChessApp* app) {
 
         code_box = (Rectangle){card.x + 36.0f, card.y + 78.0f, card.width - 72.0f, 74.0f};
         room_box = (Rectangle){card.x + 36.0f, card.y + 162.0f, card.width - 72.0f, 98.0f};
-        ready_btn = (Rectangle){card.x + 36.0f, card.y + 270.0f, card.width - 72.0f, 50.0f};
-        start_btn = (Rectangle){card.x + 36.0f, card.y + 328.0f, card.width - 72.0f, 52.0f};
+        start_btn = (Rectangle){card.x + 36.0f, card.y + 272.0f, card.width - 72.0f, 52.0f};
         mode_btn = (Rectangle){card.x + 36.0f, card.y + card.height - 66.0f, 186.0f, 44.0f};
         status_box = (Rectangle){
             card.x + 36.0f,
@@ -465,25 +463,11 @@ void gui_screen_lobby(struct ChessApp* app) {
                  focus->opponent_name[0] != '\0' ? focus->opponent_name : "Waiting...");
         gui_draw_text(opp_line, (int)room_box.x + 14, (int)room_box.y + 62, 22, palette->text_secondary);
 
-        if (gui_button(ready_btn, focus->local_ready ? "Host Ready (On)" : "Host Ready")) {
-            bool next_ready = !focus->local_ready;
-            if (!app_online_send_ready(app, app->lobby_focus_match, next_ready)) {
-                snprintf(app->lobby_status, sizeof(app->lobby_status), "Failed to update ready status.");
-            } else {
-                snprintf(app->lobby_status,
-                         sizeof(app->lobby_status),
-                         next_ready ? "You are Ready. Waiting for opponent."
-                                    : "You are not ready.");
-            }
-        }
-
         if (gui_button(start_btn, "Start Game")) {
             if (!focus->connected) {
                 snprintf(app->lobby_status, sizeof(app->lobby_status), "Need 2 players in room first.");
             } else if (!focus->peer_ready) {
                 snprintf(app->lobby_status, sizeof(app->lobby_status), "Opponent must press Ready first.");
-            } else if (!focus->local_ready) {
-                snprintf(app->lobby_status, sizeof(app->lobby_status), "Press Host Ready first.");
             } else if (!app_online_send_start(app, app->lobby_focus_match)) {
                 snprintf(app->lobby_status, sizeof(app->lobby_status), "Could not send start packet.");
             } else {

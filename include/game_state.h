@@ -82,6 +82,10 @@ typedef struct ChessApp {
     bool online_peer_ready;
     char online_match_code[INVITE_CODE_LEN + 1];
     char online_runtime_status[128];
+    bool online_leave_notice_open;
+    int online_leave_notice_match;
+    char online_leave_notice_title[64];
+    char online_leave_notice_text[192];
     int current_online_match;
     OnlineMatch online_matches[ONLINE_MATCH_MAX];
 

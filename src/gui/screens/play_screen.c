@@ -73,6 +73,80 @@ static void draw_text_fit(const char* text,
     gui_draw_text(buffer, x, y, font_size, color);
 }
 
+/* Draws wrapped text lines constrained to one rectangular width. */
+static int draw_text_wrap(const char* text,
+                          int x,
+                          int y,
+                          int font_size,
+                          int max_width,
+                          int line_height,
+                          int max_lines,
+                          Color color) {
+    const char* cursor = text;
+    int lines = 0;
+
+    if (text == NULL || max_width <= 0 || max_lines <= 0) {
+        return 0;
+    }
+
+    if (line_height <= 0) {
+        line_height = font_size + 6;
+    }
+
+    while (*cursor != '\0' && lines < max_lines) {
+        char line[256];
+        int len = 0;
+        int next_len = 0;
+        int last_space = -1;
+
+        while (cursor[next_len] != '\0' && cursor[next_len] != '\n' && len < (int)sizeof(line) - 1) {
+            line[len] = cursor[next_len];
+            line[len + 1] = '\0';
+
+            if (line[len] == ' ') {
+                last_space = len;
+            }
+
+            if (gui_measure_text(line, font_size) > max_width) {
+                if (last_space >= 0) {
+                    len = last_space;
+                    next_len = last_space + 1;
+                }
+                break;
+            }
+
+            len++;
+            next_len++;
+        }
+
+        while (len > 0 && line[len - 1] == ' ') {
+            len--;
+        }
+        line[len] = '\0';
+
+        if (len == 0 && cursor[0] != '\0' && cursor[0] != '\n') {
+            line[0] = cursor[0];
+            line[1] = '\0';
+            next_len = 1;
+        }
+
+        if (line[0] != '\0') {
+            gui_draw_text(line, x, y + lines * line_height, font_size, color);
+            lines++;
+        }
+
+        cursor += next_len;
+        while (*cursor == ' ') {
+            cursor++;
+        }
+        if (*cursor == '\n') {
+            cursor++;
+        }
+    }
+
+    return lines;
+}
+
 /* Finds the legal move matching UI selection state. */
 static bool find_selected_move(const ChessApp* app, int from, int to, uint8_t promotion_piece, Move* out_move) {
     for (int i = 0; i < app->legal_moves.count; ++i) {
@@ -291,7 +365,7 @@ static void draw_leave_confirm_dialog(ChessApp* app) {
     title_size = (panel_w < 460.0f) ? 30.0f : 34.0f;
     body_size = (panel_w < 460.0f) ? 18.0f : 20.0f;
     body_line_h = body_size + 8.0f;
-    body_block_h = online_mode ? (body_line_h * 3.0f) : (body_line_h * 2.0f);
+    body_block_h = online_mode ? (body_line_h * 4.0f) : (body_line_h * 3.0f);
     button_h = (panel_w < 460.0f) ? 42.0f : 46.0f;
     button_gap = (panel_w < 460.0f) ? 10.0f : 12.0f;
     stack_online_buttons = online_mode && panel_w < 640.0f;
@@ -303,8 +377,8 @@ static void draw_leave_confirm_dialog(ChessApp* app) {
     }
 
     panel_h = 24.0f + title_size + 14.0f + body_block_h + 20.0f + actions_h + 20.0f;
-    if (panel_h < (online_mode ? 258.0f : 214.0f)) {
-        panel_h = online_mode ? 258.0f : 214.0f;
+    if (panel_h < (online_mode ? 292.0f : 244.0f)) {
+        panel_h = online_mode ? 292.0f : 244.0f;
     }
     if (panel_h > sh - 20.0f) {
         panel_h = sh - 20.0f;
@@ -328,32 +402,49 @@ static void draw_leave_confirm_dialog(ChessApp* app) {
     gui_draw_text("Leave Current Game?", (int)content_x, (int)panel.y + 24, (int)title_size, palette->text_primary);
 
     if (online_mode) {
-        gui_draw_text("Menu (Keep Match): keep match in background.",
-                      (int)content_x,
-                      (int)text_y,
-                      (int)body_size,
-                      palette->text_secondary);
-        gui_draw_text("Resume later from Active Games.",
-                      (int)content_x,
-                      (int)(text_y + body_line_h),
-                      (int)body_size,
-                      palette->text_secondary);
-        gui_draw_text("Leave Match: notify opponent and end this match.",
-                      (int)content_x,
-                      (int)(text_y + body_line_h * 2.0f),
-                      (int)body_size,
-                      palette->text_secondary);
+        int lines_used = 0;
+        lines_used += draw_text_wrap("Menu (Keep Match): keep match in background.",
+                                     (int)content_x,
+                                     (int)text_y,
+                                     (int)body_size,
+                                     (int)content_w,
+                                     (int)body_line_h,
+                                     3,
+                                     palette->text_secondary);
+        lines_used += draw_text_wrap("Resume later from Active Games.",
+                                     (int)content_x,
+                                     (int)text_y + lines_used * (int)body_line_h,
+                                     (int)body_size,
+                                     (int)content_w,
+                                     (int)body_line_h,
+                                     2,
+                                     palette->text_secondary);
+        draw_text_wrap("Leave Match: notify opponent and end this match.",
+                       (int)content_x,
+                       (int)text_y + lines_used * (int)body_line_h,
+                       (int)body_size,
+                       (int)content_w,
+                       (int)body_line_h,
+                       3,
+                       palette->text_secondary);
     } else {
-        gui_draw_text("If you leave now, this match will be closed.",
-                      (int)content_x,
-                      (int)text_y,
-                      (int)body_size,
-                      palette->text_secondary);
-        gui_draw_text("You can start a new game from the main menu.",
-                      (int)content_x,
-                      (int)(text_y + body_line_h),
-                      (int)body_size,
-                      palette->text_secondary);
+        int lines_used = 0;
+        lines_used += draw_text_wrap("If you leave now, this match will be closed.",
+                                     (int)content_x,
+                                     (int)text_y,
+                                     (int)body_size,
+                                     (int)content_w,
+                                     (int)body_line_h,
+                                     3,
+                                     palette->text_secondary);
+        draw_text_wrap("You can start a new game from the main menu.",
+                       (int)content_x,
+                       (int)text_y + lines_used * (int)body_line_h,
+                       (int)body_size,
+                       (int)content_w,
+                       (int)body_line_h,
+                       3,
+                       palette->text_secondary);
     }
 
     actions_y = panel.y + panel.height - 20.0f - actions_h;
@@ -410,6 +501,74 @@ static void draw_leave_confirm_dialog(ChessApp* app) {
             app->selected_square = -1;
             app->ai_thinking = false;
             app->move_animating = false;
+        }
+    }
+}
+
+/* Shows modal notification when opponent leaves an online match. */
+static void draw_online_leave_notice_dialog(ChessApp* app) {
+    const GuiPalette* palette = gui_palette();
+    float sw = (float)GetScreenWidth();
+    float sh = (float)GetScreenHeight();
+    float panel_w = sw * 0.44f;
+    float panel_h = 236.0f;
+    Rectangle panel;
+    Rectangle ok_btn;
+    int text_x;
+    int text_w;
+    int text_y;
+    int match_index;
+
+    if (panel_w < 420.0f) {
+        panel_w = 420.0f;
+    }
+    if (panel_w > 660.0f) {
+        panel_w = 660.0f;
+    }
+
+    panel = (Rectangle){
+        sw * 0.5f - panel_w * 0.5f,
+        sh * 0.5f - panel_h * 0.5f,
+        panel_w,
+        panel_h
+    };
+    ok_btn = (Rectangle){panel.x + panel.width - 152.0f, panel.y + panel.height - 60.0f, 128.0f, 40.0f};
+    text_x = (int)panel.x + 24;
+    text_w = (int)panel.width - 48;
+    text_y = (int)panel.y + 74;
+
+    DrawRectangle(0, 0, (int)sw, (int)sh, Fade(BLACK, 0.52f));
+    DrawRectangleRounded(panel, 0.08f, 8, Fade(palette->panel, 0.98f));
+    DrawRectangleRoundedLinesEx(panel, 0.08f, 8, 1.4f, palette->panel_border);
+
+    draw_text_fit(app->online_leave_notice_title[0] != '\0' ? app->online_leave_notice_title : "Match Ended",
+                  (int)panel.x + 24,
+                  (int)panel.y + 22,
+                  34,
+                  text_w,
+                  palette->text_primary);
+    draw_text_wrap(app->online_leave_notice_text[0] != '\0'
+                       ? app->online_leave_notice_text
+                       : "Your opponent left the match. Press OK to return to menu.",
+                   text_x,
+                   text_y,
+                   20,
+                   text_w,
+                   24,
+                   4,
+                   palette->text_secondary);
+
+    if (gui_button(ok_btn, "OK")) {
+        match_index = app->online_leave_notice_match;
+        app->online_leave_notice_open = false;
+        app->online_leave_notice_match = -1;
+        app->online_leave_notice_title[0] = '\0';
+        app->online_leave_notice_text[0] = '\0';
+
+        if (match_index >= 0) {
+            app_online_close_match(app, match_index, false);
+        } else {
+            app->screen = SCREEN_MENU;
         }
     }
 }
@@ -643,6 +802,11 @@ void gui_screen_play(struct ChessApp* app) {
 
     if (app->leave_confirm_open) {
         draw_leave_confirm_dialog(app);
+        return;
+    }
+
+    if (app->online_leave_notice_open) {
+        draw_online_leave_notice_dialog(app);
         return;
     }
 

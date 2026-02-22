@@ -425,8 +425,8 @@ void gui_input_box(Rectangle bounds, char* buffer, int capacity, bool active) {
         bool select_all = ctrl_down && IsKeyPressed(KEY_A);
         bool copy = ctrl_down && IsKeyPressed(KEY_C);
         bool cut = ctrl_down && IsKeyPressed(KEY_X);
-        bool backspace = IsKeyPressed(KEY_BACKSPACE);
-        bool del = IsKeyPressed(KEY_DELETE);
+        bool backspace = IsKeyPressed(KEY_BACKSPACE) || IsKeyPressedRepeat(KEY_BACKSPACE);
+        bool del = IsKeyPressed(KEY_DELETE) || IsKeyPressedRepeat(KEY_DELETE);
 
         if (select_all) {
             input_set_selection(buffer, true);

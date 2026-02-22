@@ -326,16 +326,38 @@ static void maybe_process_network(ChessApp* app) {
                         app->mode == MODE_ONLINE &&
                         app->screen == SCREEN_PLAY) {
                         audio_play(AUDIO_SFX_GAME_OVER);
+                        match->in_game = false;
+                        match->connected = false;
+                        match->network.connected = false;
+                        match->network.peer_addr_len = 0;
+                        match->peer_ready = false;
+                        strncpy(match->status,
+                                "Opponent left the game. Match ended.",
+                                sizeof(match->status) - 1);
+                        match->status[sizeof(match->status) - 1] = '\0';
                         snprintf(app->online_runtime_status,
                                  sizeof(app->online_runtime_status),
                                  "Opponent left the game. Match ended.");
                         snprintf(app->lobby_status,
                                  sizeof(app->lobby_status),
                                  "Your opponent left the game. Match ended.");
-                        app->screen = SCREEN_MENU;
+                        app->online_match_active = false;
+                        app->online_peer_ready = false;
+                        app->leave_confirm_open = false;
+                        app->online_leave_notice_open = true;
+                        app->online_leave_notice_match = index;
+                        strncpy(app->online_leave_notice_title,
+                                "Match Ended",
+                                sizeof(app->online_leave_notice_title) - 1);
+                        app->online_leave_notice_title[sizeof(app->online_leave_notice_title) - 1] = '\0';
+                        strncpy(app->online_leave_notice_text,
+                                "Your opponent left the match. Press OK to return to menu.",
+                                sizeof(app->online_leave_notice_text) - 1);
+                        app->online_leave_notice_text[sizeof(app->online_leave_notice_text) - 1] = '\0';
+                    } else {
+                        app_online_close_match(app, index, false);
+                        removed = true;
                     }
-                    app_online_close_match(app, index, false);
-                    removed = true;
                 } else if (match->is_host) {
                     match->connected = false;
                     match->network.connected = false;
