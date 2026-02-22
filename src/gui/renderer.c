@@ -118,6 +118,47 @@ static PieceDrawStyle piece_style(Side side, float alpha) {
     return style;
 }
 
+/* Clamps integer to byte range for color channel updates. */
+static unsigned char clamp_u8(int value) {
+    if (value < 0) {
+        return 0;
+    }
+    if (value > 255) {
+        return 255;
+    }
+    return (unsigned char)value;
+}
+
+/* Adjusts brightness and alpha of a color. */
+static Color adjust_color(Color color, int delta, float alpha_scale) {
+    Color out = color;
+    int a = (int)((float)color.a * alpha_scale);
+
+    out.r = clamp_u8((int)color.r + delta);
+    out.g = clamp_u8((int)color.g + delta);
+    out.b = clamp_u8((int)color.b + delta);
+    out.a = clamp_u8(a);
+    return out;
+}
+
+/* Draws a shared base pedestal for all piece types. */
+static void draw_piece_foundation(Vector2 c, float s, Color fill, Color stroke, float alpha) {
+    Color shadow = with_alpha(BLACK, 0.24f * alpha);
+    Color rim_light = adjust_color(fill, 18, alpha);
+
+    DrawEllipse((int)c.x, (int)(c.y + s * 0.36f), (int)(s * 0.32f), (int)(s * 0.10f), shadow);
+
+    DrawEllipse((int)c.x, (int)(c.y + s * 0.27f), (int)(s * 0.34f), (int)(s * 0.11f), stroke);
+    DrawEllipse((int)c.x, (int)(c.y + s * 0.27f), (int)(s * 0.30f), (int)(s * 0.08f), fill);
+    DrawEllipse((int)(c.x - s * 0.05f), (int)(c.y + s * 0.25f), (int)(s * 0.18f), (int)(s * 0.04f), rim_light);
+}
+
+/* Draws a soft glossy highlight spot to fake 3D lighting. */
+static void draw_piece_gloss(Vector2 c, float radius, Color fill, float alpha) {
+    Color gloss = with_alpha(adjust_color(fill, 42, 1.0f), 0.45f * alpha);
+    DrawCircleV((Vector2){c.x - radius * 0.34f, c.y - radius * 0.30f}, radius * 0.34f, gloss);
+}
+
 /* Converts board square index to rectangle in pixel coordinates. */
 static Rectangle square_rect(const GuiPlayLayout* layout, int square) {
     float file = (float)(square & 7);
@@ -193,177 +234,234 @@ static void draw_card(Rectangle rect, Color fill, Color border) {
 /* Draws a piece with vector shapes so no sprite assets are required. */
 static void draw_piece_shape(PieceType piece, Side side, Vector2 center, float size, float alpha) {
     PieceDrawStyle style = piece_style(side, alpha);
-    Color shadow = with_alpha((Color){0, 0, 0, 255}, 0.18f * alpha);
+    Color fill = adjust_color(style.fill, 0, alpha);
+    Color fill_light = adjust_color(style.fill, 24, alpha);
+    Color fill_dark = adjust_color(style.fill, -22, alpha);
+    Color stroke = adjust_color(style.stroke, 0, alpha);
+    Color stroke_dark = adjust_color(style.stroke, -20, alpha);
+    Color shade = with_alpha(BLACK, 0.16f * alpha);
     float s = size;
+    bool compact = s < 30.0f;
     Vector2 c = center;
     Vector2 shadow_offset = {2.2f, 2.0f};
 
+    DrawEllipse((int)(c.x + shadow_offset.x),
+                (int)(c.y + s * 0.35f + shadow_offset.y),
+                (int)(s * 0.30f),
+                (int)(s * 0.08f),
+                with_alpha(BLACK, 0.16f * alpha));
+
+    draw_piece_foundation(c, s, fill_dark, stroke, alpha);
+
     c.x += shadow_offset.x;
     c.y += shadow_offset.y;
-    DrawCircleV(c, s * 0.14f, shadow);
+    DrawCircleV(c, s * 0.13f, with_alpha(BLACK, 0.14f * alpha));
     c = center;
 
     if (piece == PIECE_PAWN) {
-        DrawCircleV((Vector2){c.x, c.y - s * 0.22f}, s * 0.17f, style.stroke);
-        DrawCircleV((Vector2){c.x, c.y - s * 0.22f}, s * 0.14f, style.fill);
-        DrawRectangleRounded((Rectangle){c.x - s * 0.19f, c.y - s * 0.05f, s * 0.38f, s * 0.35f},
+        DrawCircleV((Vector2){c.x, c.y - s * 0.21f}, s * 0.18f, stroke);
+        DrawCircleV((Vector2){c.x, c.y - s * 0.21f}, s * 0.15f, fill);
+        DrawRectangleRounded((Rectangle){c.x - s * 0.20f, c.y - s * 0.01f, s * 0.40f, s * 0.30f},
                              0.45f,
                              8,
-                             style.stroke);
-        DrawRectangleRounded((Rectangle){c.x - s * 0.16f, c.y - s * 0.03f, s * 0.32f, s * 0.30f},
+                             stroke);
+        DrawRectangleRounded((Rectangle){c.x - s * 0.16f, c.y + s * 0.01f, s * 0.32f, s * 0.26f},
                              0.45f,
                              8,
-                             style.fill);
-        DrawRectangleRounded((Rectangle){c.x - s * 0.30f, c.y + s * 0.18f, s * 0.60f, s * 0.12f},
+                             fill_dark);
+        DrawEllipse((int)c.x, (int)(c.y + s * 0.11f), (int)(s * 0.10f), (int)(s * 0.16f), fill_light);
+        DrawRectangleRounded((Rectangle){c.x - s * 0.28f, c.y + s * 0.18f, s * 0.56f, s * 0.10f},
                              0.35f,
                              8,
-                             style.stroke);
-        DrawRectangleRounded((Rectangle){c.x - s * 0.26f, c.y + s * 0.20f, s * 0.52f, s * 0.08f},
-                             0.35f,
-                             8,
-                             style.fill);
+                             stroke_dark);
+        DrawRectangleRounded((Rectangle){c.x - s * 0.24f, c.y + s * 0.20f, s * 0.48f, s * 0.06f},
+                             0.35f, 8, fill);
+        draw_piece_gloss((Vector2){c.x, c.y - s * 0.23f}, s * 0.26f, fill, alpha);
         return;
     }
 
     if (piece == PIECE_KNIGHT) {
-        DrawTriangle((Vector2){c.x - s * 0.24f, c.y + s * 0.27f},
-                     (Vector2){c.x + s * 0.24f, c.y + s * 0.27f},
-                     (Vector2){c.x - s * 0.05f, c.y - s * 0.30f},
-                     style.stroke);
+        DrawTriangle((Vector2){c.x - s * 0.24f, c.y + s * 0.25f},
+                     (Vector2){c.x + s * 0.22f, c.y + s * 0.25f},
+                     (Vector2){c.x - s * 0.08f, c.y - s * 0.33f},
+                     stroke);
         DrawTriangle((Vector2){c.x - s * 0.20f, c.y + s * 0.23f},
-                     (Vector2){c.x + s * 0.20f, c.y + s * 0.23f},
-                     (Vector2){c.x - s * 0.02f, c.y - s * 0.24f},
-                     style.fill);
-        DrawCircleV((Vector2){c.x + s * 0.05f, c.y - s * 0.05f}, s * 0.05f, style.stroke);
-        DrawCircleV((Vector2){c.x + s * 0.05f, c.y - s * 0.05f}, s * 0.03f, style.fill);
-        DrawRectangleRounded((Rectangle){c.x - s * 0.30f, c.y + s * 0.22f, s * 0.60f, s * 0.11f},
+                     (Vector2){c.x + s * 0.18f, c.y + s * 0.23f},
+                     (Vector2){c.x - s * 0.06f, c.y - s * 0.28f},
+                     fill_dark);
+        DrawTriangle((Vector2){c.x - s * 0.12f, c.y - s * 0.14f},
+                     (Vector2){c.x + s * 0.09f, c.y - s * 0.02f},
+                     (Vector2){c.x - s * 0.02f, c.y - s * 0.28f},
+                     fill_light);
+        DrawTriangle((Vector2){c.x - s * 0.12f, c.y - s * 0.34f},
+                     (Vector2){c.x - s * 0.04f, c.y - s * 0.34f},
+                     (Vector2){c.x - s * 0.08f, c.y - s * 0.44f},
+                     stroke_dark);
+        DrawCircleV((Vector2){c.x + s * 0.03f, c.y - s * 0.09f}, s * 0.042f, stroke_dark);
+        DrawCircleV((Vector2){c.x + s * 0.03f, c.y - s * 0.09f}, s * 0.028f, fill);
+        DrawCircleV((Vector2){c.x + s * 0.06f, c.y - s * 0.11f}, s * 0.008f, stroke);
+        DrawLineEx((Vector2){c.x - s * 0.20f, c.y - s * 0.05f},
+                   (Vector2){c.x - s * 0.03f, c.y + s * 0.16f},
+                   fmaxf(1.0f, s * 0.03f),
+                   shade);
+        DrawRectangleRounded((Rectangle){c.x - s * 0.30f, c.y + s * 0.20f, s * 0.58f, s * 0.10f},
                              0.35f,
                              8,
-                             style.stroke);
-        DrawRectangleRounded((Rectangle){c.x - s * 0.26f, c.y + s * 0.24f, s * 0.52f, s * 0.07f},
+                             stroke_dark);
+        DrawRectangleRounded((Rectangle){c.x - s * 0.25f, c.y + s * 0.22f, s * 0.50f, s * 0.06f},
                              0.35f,
                              8,
-                             style.fill);
+                             fill);
+        if (!compact) {
+            draw_piece_gloss((Vector2){c.x - s * 0.02f, c.y - s * 0.10f}, s * 0.26f, fill, alpha);
+        }
         return;
     }
 
     if (piece == PIECE_BISHOP) {
-        DrawEllipse((int)c.x, (int)(c.y - s * 0.08f), (int)(s * 0.20f), (int)(s * 0.28f), style.stroke);
-        DrawEllipse((int)c.x, (int)(c.y - s * 0.08f), (int)(s * 0.16f), (int)(s * 0.24f), style.fill);
-        DrawCircleV((Vector2){c.x, c.y - s * 0.32f}, s * 0.10f, style.stroke);
-        DrawCircleV((Vector2){c.x, c.y - s * 0.32f}, s * 0.07f, style.fill);
+        DrawEllipse((int)c.x, (int)(c.y - s * 0.06f), (int)(s * 0.22f), (int)(s * 0.30f), stroke);
+        DrawEllipse((int)c.x, (int)(c.y - s * 0.06f), (int)(s * 0.18f), (int)(s * 0.26f), fill_dark);
+        DrawEllipse((int)(c.x - s * 0.03f), (int)(c.y - s * 0.10f), (int)(s * 0.08f), (int)(s * 0.16f), fill_light);
+        DrawCircleV((Vector2){c.x, c.y - s * 0.34f}, s * 0.11f, stroke);
+        DrawCircleV((Vector2){c.x, c.y - s * 0.34f}, s * 0.08f, fill);
         DrawLineEx((Vector2){c.x - s * 0.07f, c.y - s * 0.22f},
-                   (Vector2){c.x + s * 0.07f, c.y - s * 0.08f},
-                   2.2f,
-                   style.stroke);
-        DrawRectangleRounded((Rectangle){c.x - s * 0.29f, c.y + s * 0.20f, s * 0.58f, s * 0.11f},
+                   (Vector2){c.x + s * 0.08f, c.y - s * 0.04f},
+                   fmaxf(1.0f, s * 0.04f),
+                   stroke_dark);
+        DrawRectangleRounded((Rectangle){c.x - s * 0.28f, c.y + s * 0.20f, s * 0.56f, s * 0.10f},
                              0.35f,
                              8,
-                             style.stroke);
-        DrawRectangleRounded((Rectangle){c.x - s * 0.25f, c.y + s * 0.22f, s * 0.50f, s * 0.07f},
+                             stroke_dark);
+        DrawRectangleRounded((Rectangle){c.x - s * 0.24f, c.y + s * 0.22f, s * 0.48f, s * 0.06f},
                              0.35f,
                              8,
-                             style.fill);
+                             fill);
+        if (!compact) {
+            draw_piece_gloss((Vector2){c.x, c.y - s * 0.15f}, s * 0.24f, fill, alpha);
+        }
         return;
     }
 
     if (piece == PIECE_ROOK) {
-        DrawRectangleRounded((Rectangle){c.x - s * 0.24f, c.y - s * 0.16f, s * 0.48f, s * 0.43f},
+        DrawRectangleRounded((Rectangle){c.x - s * 0.25f, c.y - s * 0.14f, s * 0.50f, s * 0.40f},
                              0.16f,
                              8,
-                             style.stroke);
-        DrawRectangleRounded((Rectangle){c.x - s * 0.20f, c.y - s * 0.12f, s * 0.40f, s * 0.37f},
+                             stroke);
+        DrawRectangleRounded((Rectangle){c.x - s * 0.21f, c.y - s * 0.11f, s * 0.42f, s * 0.34f},
                              0.16f,
                              8,
-                             style.fill);
+                             fill_dark);
+        DrawRectangleRounded((Rectangle){c.x - s * 0.13f, c.y - s * 0.10f, s * 0.12f, s * 0.31f}, 0.16f, 6, fill_light);
         for (int i = -1; i <= 1; ++i) {
-            DrawRectangleRounded((Rectangle){c.x + (float)i * s * 0.14f - s * 0.05f, c.y - s * 0.30f, s * 0.10f, s * 0.13f},
+            DrawRectangleRounded((Rectangle){c.x + (float)i * s * 0.14f - s * 0.05f, c.y - s * 0.31f, s * 0.10f, s * 0.14f},
                                  0.2f,
                                  6,
-                                 style.stroke);
-            DrawRectangleRounded((Rectangle){c.x + (float)i * s * 0.14f - s * 0.04f, c.y - s * 0.28f, s * 0.08f, s * 0.10f},
+                                 stroke_dark);
+            DrawRectangleRounded((Rectangle){c.x + (float)i * s * 0.14f - s * 0.04f, c.y - s * 0.29f, s * 0.08f, s * 0.10f},
                                  0.2f,
                                  6,
-                                 style.fill);
+                                 fill);
         }
-        DrawRectangleRounded((Rectangle){c.x - s * 0.32f, c.y + s * 0.20f, s * 0.64f, s * 0.11f},
+        DrawRectangleRounded((Rectangle){c.x - s * 0.31f, c.y + s * 0.20f, s * 0.62f, s * 0.10f},
                              0.35f,
                              8,
-                             style.stroke);
-        DrawRectangleRounded((Rectangle){c.x - s * 0.28f, c.y + s * 0.22f, s * 0.56f, s * 0.07f},
+                             stroke_dark);
+        DrawRectangleRounded((Rectangle){c.x - s * 0.27f, c.y + s * 0.22f, s * 0.54f, s * 0.06f},
                              0.35f,
                              8,
-                             style.fill);
+                             fill);
+        if (!compact) {
+            draw_piece_gloss((Vector2){c.x, c.y - s * 0.08f}, s * 0.26f, fill, alpha);
+        }
         return;
     }
 
     if (piece == PIECE_QUEEN) {
-        DrawRectangleRounded((Rectangle){c.x - s * 0.23f, c.y - s * 0.06f, s * 0.46f, s * 0.34f},
+        DrawRectangleRounded((Rectangle){c.x - s * 0.23f, c.y - s * 0.07f, s * 0.46f, s * 0.35f},
                              0.30f,
                              8,
-                             style.stroke);
-        DrawRectangleRounded((Rectangle){c.x - s * 0.19f, c.y - s * 0.04f, s * 0.38f, s * 0.30f},
+                             stroke);
+        DrawRectangleRounded((Rectangle){c.x - s * 0.18f, c.y - s * 0.04f, s * 0.36f, s * 0.30f},
                              0.30f,
                              8,
-                             style.fill);
+                             fill_dark);
+        DrawEllipse((int)(c.x - s * 0.03f), (int)(c.y + s * 0.02f), (int)(s * 0.08f), (int)(s * 0.17f), fill_light);
         DrawTriangle((Vector2){c.x - s * 0.22f, c.y - s * 0.08f},
                      (Vector2){c.x + s * 0.22f, c.y - s * 0.08f},
-                     (Vector2){c.x, c.y - s * 0.34f},
-                     style.stroke);
-        DrawTriangle((Vector2){c.x - s * 0.18f, c.y - s * 0.09f},
-                     (Vector2){c.x + s * 0.18f, c.y - s * 0.09f},
-                     (Vector2){c.x, c.y - s * 0.29f},
-                     style.fill);
-        DrawCircleV((Vector2){c.x - s * 0.16f, c.y - s * 0.28f}, s * 0.06f, style.stroke);
-        DrawCircleV((Vector2){c.x, c.y - s * 0.34f}, s * 0.06f, style.stroke);
-        DrawCircleV((Vector2){c.x + s * 0.16f, c.y - s * 0.28f}, s * 0.06f, style.stroke);
-        DrawCircleV((Vector2){c.x - s * 0.16f, c.y - s * 0.28f}, s * 0.04f, style.fill);
-        DrawCircleV((Vector2){c.x, c.y - s * 0.34f}, s * 0.04f, style.fill);
-        DrawCircleV((Vector2){c.x + s * 0.16f, c.y - s * 0.28f}, s * 0.04f, style.fill);
-        DrawRectangleRounded((Rectangle){c.x - s * 0.33f, c.y + s * 0.20f, s * 0.66f, s * 0.11f},
+                     (Vector2){c.x, c.y - s * 0.35f},
+                     stroke_dark);
+        DrawTriangle((Vector2){c.x - s * 0.17f, c.y - s * 0.09f},
+                     (Vector2){c.x + s * 0.17f, c.y - s * 0.09f},
+                     (Vector2){c.x, c.y - s * 0.30f},
+                     fill);
+        {
+            const float orb_x[5] = {-0.19f, -0.10f, 0.0f, 0.10f, 0.19f};
+            const float orb_y[5] = {-0.29f, -0.35f, -0.39f, -0.35f, -0.29f};
+            for (int i = 0; i < 5; ++i) {
+                float r = (i == 2) ? s * 0.055f : s * 0.048f;
+                DrawCircleV((Vector2){c.x + s * orb_x[i], c.y + s * orb_y[i]}, r, stroke_dark);
+                DrawCircleV((Vector2){c.x + s * orb_x[i], c.y + s * orb_y[i]}, r * 0.62f, fill_light);
+            }
+        }
+        DrawRectangleRounded((Rectangle){c.x - s * 0.32f, c.y + s * 0.20f, s * 0.64f, s * 0.10f},
                              0.35f,
                              8,
-                             style.stroke);
-        DrawRectangleRounded((Rectangle){c.x - s * 0.29f, c.y + s * 0.22f, s * 0.58f, s * 0.07f},
+                             stroke_dark);
+        DrawRectangleRounded((Rectangle){c.x - s * 0.28f, c.y + s * 0.22f, s * 0.56f, s * 0.06f},
                              0.35f,
                              8,
-                             style.fill);
+                             fill);
+        if (!compact) {
+            draw_piece_gloss((Vector2){c.x + s * 0.02f, c.y - s * 0.04f}, s * 0.28f, fill, alpha);
+        }
         return;
     }
 
     if (piece == PIECE_KING) {
-        DrawRectangleRounded((Rectangle){c.x - s * 0.19f, c.y - s * 0.07f, s * 0.38f, s * 0.35f},
+        DrawRectangleRounded((Rectangle){c.x - s * 0.20f, c.y - s * 0.06f, s * 0.40f, s * 0.34f},
                              0.30f,
                              8,
-                             style.stroke);
-        DrawRectangleRounded((Rectangle){c.x - s * 0.16f, c.y - s * 0.05f, s * 0.32f, s * 0.31f},
+                             stroke);
+        DrawRectangleRounded((Rectangle){c.x - s * 0.16f, c.y - s * 0.03f, s * 0.32f, s * 0.28f},
                              0.30f,
                              8,
-                             style.fill);
+                             fill_dark);
+        DrawEllipse((int)(c.x - s * 0.02f), (int)(c.y + s * 0.02f), (int)(s * 0.08f), (int)(s * 0.14f), fill_light);
+        DrawRectangleRounded((Rectangle){c.x - s * 0.18f, c.y - s * 0.18f, s * 0.36f, s * 0.07f},
+                             0.20f, 6, stroke_dark);
+        DrawRectangleRounded((Rectangle){c.x - s * 0.14f, c.y - s * 0.17f, s * 0.28f, s * 0.05f},
+                             0.20f, 6, fill);
         DrawRectangleRounded((Rectangle){c.x - s * 0.05f, c.y - s * 0.36f, s * 0.10f, s * 0.18f},
                              0.25f,
                              6,
-                             style.stroke);
+                             stroke_dark);
         DrawRectangleRounded((Rectangle){c.x - s * 0.03f, c.y - s * 0.34f, s * 0.06f, s * 0.15f},
                              0.25f,
                              6,
-                             style.fill);
+                             fill);
         DrawRectangleRounded((Rectangle){c.x - s * 0.14f, c.y - s * 0.30f, s * 0.28f, s * 0.08f},
                              0.25f,
                              6,
-                             style.stroke);
+                             stroke_dark);
         DrawRectangleRounded((Rectangle){c.x - s * 0.12f, c.y - s * 0.29f, s * 0.24f, s * 0.06f},
                              0.25f,
                              6,
-                             style.fill);
-        DrawRectangleRounded((Rectangle){c.x - s * 0.33f, c.y + s * 0.20f, s * 0.66f, s * 0.11f},
+                             fill_light);
+        DrawRectangleRounded((Rectangle){c.x - s * 0.32f, c.y + s * 0.20f, s * 0.64f, s * 0.10f},
                              0.35f,
                              8,
-                             style.stroke);
-        DrawRectangleRounded((Rectangle){c.x - s * 0.29f, c.y + s * 0.22f, s * 0.58f, s * 0.07f},
+                             stroke_dark);
+        DrawRectangleRounded((Rectangle){c.x - s * 0.28f, c.y + s * 0.22f, s * 0.56f, s * 0.06f},
                              0.35f,
                              8,
-                             style.fill);
+                             fill);
+        if (!compact) {
+            draw_piece_gloss((Vector2){c.x, c.y - s * 0.02f}, s * 0.27f, fill, alpha);
+        }
+    } else {
+        /* Fallback silhouette for unknown piece values. */
+        DrawCircleV(c, s * 0.18f, stroke);
+        DrawCircleV(c, s * 0.14f, fill);
     }
 }
 
