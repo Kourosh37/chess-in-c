@@ -84,14 +84,41 @@ if(NOT _pack_result EQUAL 0)
         "stderr:\n${_pack_stderr}")
 endif()
 
-file(TO_NATIVE_PATH "${_sfx_module}" _sfx_native)
-file(TO_NATIVE_PATH "${_config_file}" _config_native)
-file(TO_NATIVE_PATH "${_payload_file}" _payload_native)
-file(TO_NATIVE_PATH "${_output_file}" _output_native)
+set(_concat_ps1 "${_release_dir}/concat_onefile.ps1")
+file(WRITE "${_concat_ps1}" [=[
+param(
+    [Parameter(Mandatory = $true)][string]$Sfx,
+    [Parameter(Mandatory = $true)][string]$Cfg,
+    [Parameter(Mandatory = $true)][string]$Payload,
+    [Parameter(Mandatory = $true)][string]$Out
+)
 
-set(_copy_cmd "copy /b \"${_sfx_native}\"+\"${_config_native}\"+\"${_payload_native}\" \"${_output_native}\" >nul")
+$ErrorActionPreference = 'Stop'
+
+$outDir = Split-Path -Parent $Out
+if (-not (Test-Path -LiteralPath $outDir)) {
+    New-Item -ItemType Directory -Path $outDir | Out-Null
+}
+
+$dst = [System.IO.File]::Open($Out, [System.IO.FileMode]::Create, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+try {
+    foreach ($src in @($Sfx, $Cfg, $Payload)) {
+        $data = [System.IO.File]::ReadAllBytes($src)
+        $dst.Write($data, 0, $data.Length)
+    }
+}
+finally {
+    $dst.Dispose()
+}
+]=])
+
 execute_process(
-    COMMAND cmd /c "${_copy_cmd}"
+    COMMAND powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass
+        -File "${_concat_ps1}"
+        -Sfx "${_sfx_module}"
+        -Cfg "${_config_file}"
+        -Payload "${_payload_file}"
+        -Out "${_output_file}"
     RESULT_VARIABLE _copy_result
     OUTPUT_VARIABLE _copy_stdout
     ERROR_VARIABLE _copy_stderr
@@ -107,5 +134,6 @@ endif()
 file(REMOVE_RECURSE "${_stage_dir}")
 file(REMOVE "${_payload_file}")
 file(REMOVE "${_config_file}")
+file(REMOVE "${_concat_ps1}")
 
 message(STATUS "One-file package created: ${_output_file}")
