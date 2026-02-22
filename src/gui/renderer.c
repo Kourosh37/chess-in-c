@@ -79,6 +79,10 @@ static const GuiPalette g_palettes[] = {
 };
 
 static int g_active_theme = 0;
+enum {
+    PIECE_VARIANT_NORMAL = 0,
+    PIECE_VARIANT_FLIPPED = 1
+};
 static const char* g_piece_texture_paths[2][6] = {
     {
         "assets/pieces/staunton/wp.png",
@@ -97,8 +101,26 @@ static const char* g_piece_texture_paths[2][6] = {
         "assets/pieces/staunton/bk.png"
     }
 };
-static Texture2D g_piece_textures[2][6];
-static bool g_piece_texture_ready[2][6];
+static const char* g_piece_texture_paths_flipped[2][6] = {
+    {
+        "assets/pieces/staunton_flipped/wp.png",
+        "assets/pieces/staunton_flipped/wn.png",
+        "assets/pieces/staunton_flipped/wb.png",
+        "assets/pieces/staunton_flipped/wr.png",
+        "assets/pieces/staunton_flipped/wq.png",
+        "assets/pieces/staunton_flipped/wk.png"
+    },
+    {
+        "assets/pieces/staunton_flipped/bp.png",
+        "assets/pieces/staunton_flipped/bn.png",
+        "assets/pieces/staunton_flipped/bb.png",
+        "assets/pieces/staunton_flipped/br.png",
+        "assets/pieces/staunton_flipped/bq.png",
+        "assets/pieces/staunton_flipped/bk.png"
+    }
+};
+static Texture2D g_piece_textures[2][2][6];
+static bool g_piece_texture_ready[2][2][6];
 static bool g_piece_texture_init_attempted = false;
 static RenderTexture2D g_board_surface;
 static bool g_board_surface_ready = false;
@@ -202,25 +224,39 @@ static void ensure_piece_textures_loaded(void) {
 
     for (int side = 0; side < 2; ++side) {
         for (int piece = 0; piece < 6; ++piece) {
-            const char* path = g_piece_texture_paths[side][piece];
+            const char* normal_path = g_piece_texture_paths[side][piece];
+            const char* flipped_path = g_piece_texture_paths_flipped[side][piece];
 
-            if (!FileExists(path)) {
-                continue;
+            if (FileExists(normal_path)) {
+                g_piece_textures[side][PIECE_VARIANT_NORMAL][piece] = LoadTexture(normal_path);
+                g_piece_texture_ready[side][PIECE_VARIANT_NORMAL][piece] =
+                    (g_piece_textures[side][PIECE_VARIANT_NORMAL][piece].id != 0);
             }
 
-            g_piece_textures[side][piece] = LoadTexture(path);
-            g_piece_texture_ready[side][piece] = (g_piece_textures[side][piece].id != 0);
+            if (FileExists(flipped_path)) {
+                g_piece_textures[side][PIECE_VARIANT_FLIPPED][piece] = LoadTexture(flipped_path);
+                g_piece_texture_ready[side][PIECE_VARIANT_FLIPPED][piece] =
+                    (g_piece_textures[side][PIECE_VARIANT_FLIPPED][piece].id != 0);
+            }
         }
     }
 }
 
 /* Draws a realistic piece texture if loaded, returns false when unavailable. */
-static bool draw_piece_texture(PieceType piece, Side side, Vector2 center, float size, float alpha, float rotation_deg) {
+static bool draw_piece_texture(PieceType piece,
+                               Side side,
+                               Vector2 center,
+                               float size,
+                               float alpha,
+                               float rotation_deg,
+                               bool use_flipped_variant) {
     Texture2D tex;
     Rectangle src;
     Rectangle dst;
     Vector2 origin;
     float ratio;
+    int variant = use_flipped_variant ? PIECE_VARIANT_FLIPPED : PIECE_VARIANT_NORMAL;
+    float final_rotation = rotation_deg;
 
     if (side < SIDE_WHITE || side > SIDE_BLACK) {
         return false;
@@ -230,11 +266,16 @@ static bool draw_piece_texture(PieceType piece, Side side, Vector2 center, float
     }
 
     ensure_piece_textures_loaded();
-    if (!g_piece_texture_ready[side][piece]) {
-        return false;
+    if (!g_piece_texture_ready[side][variant][piece]) {
+        if (variant == PIECE_VARIANT_FLIPPED && g_piece_texture_ready[side][PIECE_VARIANT_NORMAL][piece]) {
+            variant = PIECE_VARIANT_NORMAL;
+            final_rotation += 180.0f;
+        } else {
+            return false;
+        }
     }
 
-    tex = g_piece_textures[side][piece];
+    tex = g_piece_textures[side][variant][piece];
     if (tex.width <= 0 || tex.height <= 0) {
         return false;
     }
@@ -247,7 +288,7 @@ static bool draw_piece_texture(PieceType piece, Side side, Vector2 center, float
         dst.height = dst.width / ratio;
     }
     dst.x = center.x;
-    dst.y = center.y + size * 0.02f;
+    dst.y = center.y;
 
     origin = (Vector2){dst.width * 0.5f, dst.height * 0.5f};
     src = (Rectangle){0.0f, 0.0f, (float)tex.width, (float)tex.height};
@@ -257,7 +298,7 @@ static bool draw_piece_texture(PieceType piece, Side side, Vector2 center, float
                 (int)(size * 0.29f),
                 (int)(size * 0.075f),
                 with_alpha(BLACK, 0.16f * alpha));
-    DrawTexturePro(tex, src, dst, origin, rotation_deg, with_alpha(WHITE, alpha));
+    DrawTexturePro(tex, src, dst, origin, final_rotation, with_alpha(WHITE, alpha));
     return true;
 }
 
@@ -280,20 +321,6 @@ static Vector2 square_center(const GuiPlayLayout* layout, int square) {
     return (Vector2){
         rect.x + rect.width * 0.5f,
         rect.y + rect.height * 0.5f
-    };
-}
-
-/* Rotates a point around the provided pivot by angle degrees. */
-static Vector2 rotate_point(Vector2 point, Vector2 pivot, float rotation_deg) {
-    float rad = rotation_deg * DEG2RAD;
-    float s = sinf(rad);
-    float c = cosf(rad);
-    float dx = point.x - pivot.x;
-    float dy = point.y - pivot.y;
-
-    return (Vector2){
-        pivot.x + dx * c - dy * s,
-        pivot.y + dx * s + dy * c
     };
 }
 
@@ -512,7 +539,13 @@ static void draw_card(Rectangle rect, Color fill, Color border) {
 }
 
 /* Draws a piece with vector shapes so no sprite assets are required. */
-static void draw_piece_shape(PieceType piece, Side side, Vector2 center, float size, float alpha, float rotation_deg) {
+static void draw_piece_shape(PieceType piece,
+                             Side side,
+                             Vector2 center,
+                             float size,
+                             float alpha,
+                             float rotation_deg,
+                             bool use_flipped_variant) {
     PieceDrawStyle style = piece_style(side, alpha);
     Color fill = adjust_color(style.fill, 0, alpha);
     Color fill_light = adjust_color(style.fill, 24, alpha);
@@ -526,7 +559,7 @@ static void draw_piece_shape(PieceType piece, Side side, Vector2 center, float s
     Vector2 c = center;
     Vector2 shadow_offset = {2.2f, 2.0f};
 
-    if (draw_piece_texture(piece, side, center, size, alpha, rotation_deg)) {
+    if (draw_piece_texture(piece, side, center, size, alpha, rotation_deg, use_flipped_variant)) {
         return;
     }
 
@@ -890,7 +923,8 @@ static void draw_captured_group(const Position* pos, Rectangle rect, Side captur
                              (Vector2){x + icon_size * 0.5f, y + icon_size * 0.5f},
                              icon_size,
                              0.95f,
-                             0.0f);
+                             0.0f,
+                             false);
             x += icon_size + gap;
         }
     }
@@ -1036,10 +1070,14 @@ void gui_draw_board(const ChessApp* app) {
     int checked_king_square = -1;
     int check_attacker_square = -1;
     float piece_size = layout.square_size * 0.88f;
+    bool use_flipped_pieces;
+    float piece_rotation;
 
     update_board_rotation(app);
     draw_card(info_card, with_alpha(palette->panel, 0.92f), palette->panel_border);
     draw_coordinate_frame(&layout);
+    use_flipped_pieces = (board_target_side(app) == SIDE_BLACK);
+    piece_rotation = 0.0f;
 
     if (!ensure_board_surface(board_px)) {
         return;
@@ -1084,6 +1122,50 @@ void gui_draw_board(const ChessApp* app) {
         }
     }
 
+    for (int square = 0; square < BOARD_SQUARES; ++square) {
+        Side side;
+        PieceType piece;
+        Vector2 center;
+
+        if (!position_piece_at(&app->position, square, &side, &piece)) {
+            continue;
+        }
+
+        if (app->move_animating && square == app->move_anim_to) {
+            continue;
+        }
+
+        center = square_center(&board_surface_layout, square);
+        draw_piece_shape(piece, side, center, piece_size, 1.0f, piece_rotation, use_flipped_pieces);
+    }
+
+    if (app->move_animating) {
+        Vector2 from = square_center(&board_surface_layout, app->move_anim_from);
+        Vector2 to = square_center(&board_surface_layout, app->move_anim_to);
+        float t = app->move_anim_progress;
+        float eased;
+        Vector2 current;
+
+        if (t < 0.0f) {
+            t = 0.0f;
+        }
+        if (t > 1.0f) {
+            t = 1.0f;
+        }
+
+        eased = t * t * (3.0f - 2.0f * t);
+        current.x = from.x + (to.x - from.x) * eased;
+        current.y = from.y + (to.y - from.y) * eased;
+
+        draw_piece_shape(app->move_anim_piece,
+                         app->move_anim_side,
+                         current,
+                         piece_size,
+                         1.0f,
+                         piece_rotation,
+                         use_flipped_pieces);
+    }
+
     if (in_check && checked_king_square >= 0) {
         Rectangle king_rect = square_rect(&board_surface_layout, checked_king_square);
         DrawRectangleLinesEx(king_rect, fmaxf(4.0f, layout.square_size * 0.08f), (Color){199, 36, 48, 255});
@@ -1110,59 +1192,6 @@ void gui_draw_board(const ChessApp* app) {
         Vector2 origin = {layout.board.width * 0.5f, layout.board.height * 0.5f};
 
         DrawTexturePro(g_board_surface.texture, src, dst, origin, g_board_rotation_deg, WHITE);
-    }
-
-    {
-        Vector2 board_center = {
-            layout.board.x + layout.board.width * 0.5f,
-            layout.board.y + layout.board.height * 0.5f
-        };
-        float piece_rotation = g_board_rotation_deg;
-
-        for (int square = 0; square < BOARD_SQUARES; ++square) {
-            Side side;
-            PieceType piece;
-            Vector2 center;
-
-            if (!position_piece_at(&app->position, square, &side, &piece)) {
-                continue;
-            }
-
-            if (app->move_animating && square == app->move_anim_to) {
-                continue;
-            }
-
-            center = square_center(&layout, square);
-            center = rotate_point(center, board_center, g_board_rotation_deg);
-            draw_piece_shape(piece, side, center, piece_size, 1.0f, piece_rotation);
-        }
-
-        if (app->move_animating) {
-            Vector2 from = square_center(&layout, app->move_anim_from);
-            Vector2 to = square_center(&layout, app->move_anim_to);
-            float t = app->move_anim_progress;
-            float eased;
-            Vector2 current;
-
-            if (t < 0.0f) {
-                t = 0.0f;
-            }
-            if (t > 1.0f) {
-                t = 1.0f;
-            }
-
-            eased = t * t * (3.0f - 2.0f * t);
-            current.x = from.x + (to.x - from.x) * eased;
-            current.y = from.y + (to.y - from.y) * eased;
-            current = rotate_point(current, board_center, g_board_rotation_deg);
-
-            draw_piece_shape(app->move_anim_piece,
-                             app->move_anim_side,
-                             current,
-                             piece_size,
-                             1.0f,
-                             piece_rotation);
-        }
     }
 
     DrawRectangleRoundedLinesEx(layout.board, 0.02f, 8, 2.0f, palette->board_outline);
