@@ -47,8 +47,15 @@ typedef enum AppScreen {
     SCREEN_MENU = 0,
     SCREEN_PLAY = 1,
     SCREEN_LOBBY = 2,
-    SCREEN_PROFILE = 3
+    SCREEN_SETTINGS = 3
 } AppScreen;
+
+/* Built-in visual themes exposed in the settings screen. */
+typedef enum ColorTheme {
+    THEME_CLASSIC = 0,
+    THEME_EMERALD = 1,
+    THEME_OCEAN = 2
+} ColorTheme;
 
 /* Move flags used by move generation, validation, and networking. */
 typedef enum MoveFlags {

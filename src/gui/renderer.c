@@ -1,37 +1,524 @@
 #include "gui.h"
 
-#include "engine.h"
+#include <math.h>
 
-/* Board layout constants (screen-space pixels). */
-#define BOARD_PIXELS 640
-#define BOARD_ORIGIN_X 80
-#define BOARD_ORIGIN_Y 60
-#define SQUARE_PIXELS (BOARD_PIXELS / 8)
+#include "game_state.h"
 
-/* Returns board rectangle in screen coordinates. */
-static Rectangle board_rect(void) {
-    Rectangle rect;
+typedef struct PieceDrawStyle {
+    Color fill;
+    Color stroke;
+} PieceDrawStyle;
 
-    rect.x = (float)BOARD_ORIGIN_X;
-    rect.y = (float)BOARD_ORIGIN_Y;
-    rect.width = (float)BOARD_PIXELS;
-    rect.height = (float)BOARD_PIXELS;
-    return rect;
+static const GuiPalette g_palettes[] = {
+    {
+        "Classic Amber",
+        {250, 244, 233, 255},
+        {222, 209, 186, 255},
+        {250, 250, 250, 232},
+        {239, 233, 221, 232},
+        {140, 118, 88, 255},
+        {26, 30, 35, 255},
+        {72, 79, 88, 255},
+        {182, 104, 38, 255},
+        {204, 124, 53, 255},
+        {241, 216, 177, 255},
+        {178, 127, 84, 255},
+        {52, 38, 24, 255},
+        {255, 208, 69, 255},
+        {39, 53, 70, 145},
+        {244, 244, 238, 255},
+        {96, 90, 86, 255},
+        {52, 54, 60, 255},
+        {220, 223, 229, 255}
+    },
+    {
+        "Emerald Velvet",
+        {231, 247, 240, 255},
+        {176, 216, 199, 255},
+        {246, 253, 250, 235},
+        {222, 241, 232, 235},
+        {66, 122, 95, 255},
+        {14, 39, 33, 255},
+        {44, 83, 70, 255},
+        {42, 138, 92, 255},
+        {58, 162, 112, 255},
+        {229, 246, 234, 255},
+        {107, 161, 131, 255},
+        {34, 66, 52, 255},
+        {121, 224, 169, 255},
+        {27, 84, 58, 145},
+        {248, 251, 246, 255},
+        {93, 121, 110, 255},
+        {24, 53, 43, 255},
+        {187, 223, 208, 255}
+    },
+    {
+        "Ocean Slate",
+        {228, 239, 250, 255},
+        {158, 186, 212, 255},
+        {244, 249, 255, 235},
+        {221, 232, 246, 235},
+        {58, 97, 138, 255},
+        {18, 33, 52, 255},
+        {53, 76, 105, 255},
+        {42, 116, 170, 255},
+        {58, 136, 194, 255},
+        {219, 234, 247, 255},
+        {93, 132, 170, 255},
+        {28, 52, 79, 255},
+        {122, 193, 255, 255},
+        {25, 47, 80, 145},
+        {246, 250, 255, 255},
+        {92, 114, 141, 255},
+        {27, 42, 66, 255},
+        {180, 207, 235, 255}
+    }
+};
+
+static int g_active_theme = 0;
+
+/* Clamps index into available palette range. */
+static int clamp_theme_index(int index) {
+    int max = (int)(sizeof(g_palettes) / sizeof(g_palettes[0])) - 1;
+    if (index < 0) {
+        return 0;
+    }
+    if (index > max) {
+        return max;
+    }
+    return index;
 }
 
-/* Converts mouse pixel position to board square index (0..63), or -1 if outside. */
+/* Returns alpha-adjusted color copy. */
+static Color with_alpha(Color color, float alpha) {
+    float a = alpha;
+    if (a < 0.0f) {
+        a = 0.0f;
+    }
+    if (a > 1.0f) {
+        a = 1.0f;
+    }
+    color.a = (unsigned char)(color.a * a);
+    return color;
+}
+
+/* Returns piece style for white/black side from active palette. */
+static PieceDrawStyle piece_style(Side side, float alpha) {
+    const GuiPalette* palette = gui_palette();
+    PieceDrawStyle style;
+
+    if (side == SIDE_WHITE) {
+        style.fill = with_alpha(palette->white_piece_fill, alpha);
+        style.stroke = with_alpha(palette->white_piece_stroke, alpha);
+    } else {
+        style.fill = with_alpha(palette->black_piece_fill, alpha);
+        style.stroke = with_alpha(palette->black_piece_stroke, alpha);
+    }
+
+    return style;
+}
+
+/* Converts board square index to rectangle in pixel coordinates. */
+static Rectangle square_rect(const GuiPlayLayout* layout, int square) {
+    float file = (float)(square & 7);
+    float rank = (float)(square >> 3);
+
+    return (Rectangle){
+        layout->board.x + file * layout->square_size,
+        layout->board.y + (7.0f - rank) * layout->square_size,
+        layout->square_size,
+        layout->square_size
+    };
+}
+
+/* Converts board square index to center point in pixel coordinates. */
+static Vector2 square_center(const GuiPlayLayout* layout, int square) {
+    Rectangle rect = square_rect(layout, square);
+    return (Vector2){
+        rect.x + rect.width * 0.5f,
+        rect.y + rect.height * 0.5f
+    };
+}
+
+/* Returns true when square is a legal destination for current selection. */
+static bool is_target_for_selected(const ChessApp* app, int square) {
+    if (app->selected_square < 0) {
+        return false;
+    }
+
+    for (int i = 0; i < app->legal_moves.count; ++i) {
+        if (app->legal_moves.moves[i].from == app->selected_square &&
+            app->legal_moves.moves[i].to == square) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/* Portable bit count for captured-piece view. */
+static int bit_count(Bitboard bb) {
+    int count = 0;
+    while (bb != 0ULL) {
+        bb &= (bb - 1ULL);
+        count++;
+    }
+    return count;
+}
+
+/* Initial material counts per piece type for capture tracking. */
+static int initial_piece_count(PieceType piece) {
+    if (piece == PIECE_PAWN) {
+        return 8;
+    }
+    if (piece == PIECE_KNIGHT || piece == PIECE_BISHOP || piece == PIECE_ROOK) {
+        return 2;
+    }
+    if (piece == PIECE_QUEEN) {
+        return 1;
+    }
+    return 0;
+}
+
+/* Draws a rounded rectangle with a subtle border/shadow treatment. */
+static void draw_card(Rectangle rect, Color fill, Color border) {
+    DrawRectangleRounded((Rectangle){rect.x + 3.0f, rect.y + 4.0f, rect.width, rect.height},
+                         0.09f,
+                         8,
+                         with_alpha(BLACK, 0.10f));
+    DrawRectangleRounded(rect, 0.09f, 8, fill);
+    DrawRectangleRoundedLinesEx(rect, 0.09f, 8, 1.2f, border);
+}
+
+/* Draws a piece with vector shapes so no sprite assets are required. */
+static void draw_piece_shape(PieceType piece, Side side, Vector2 center, float size, float alpha) {
+    PieceDrawStyle style = piece_style(side, alpha);
+    Color shadow = with_alpha((Color){0, 0, 0, 255}, 0.18f * alpha);
+    float s = size;
+    Vector2 c = center;
+    Vector2 shadow_offset = {2.2f, 2.0f};
+
+    c.x += shadow_offset.x;
+    c.y += shadow_offset.y;
+    DrawCircleV(c, s * 0.14f, shadow);
+    c = center;
+
+    if (piece == PIECE_PAWN) {
+        DrawCircleV((Vector2){c.x, c.y - s * 0.22f}, s * 0.17f, style.stroke);
+        DrawCircleV((Vector2){c.x, c.y - s * 0.22f}, s * 0.14f, style.fill);
+        DrawRectangleRounded((Rectangle){c.x - s * 0.19f, c.y - s * 0.05f, s * 0.38f, s * 0.35f},
+                             0.45f,
+                             8,
+                             style.stroke);
+        DrawRectangleRounded((Rectangle){c.x - s * 0.16f, c.y - s * 0.03f, s * 0.32f, s * 0.30f},
+                             0.45f,
+                             8,
+                             style.fill);
+        DrawRectangleRounded((Rectangle){c.x - s * 0.30f, c.y + s * 0.18f, s * 0.60f, s * 0.12f},
+                             0.35f,
+                             8,
+                             style.stroke);
+        DrawRectangleRounded((Rectangle){c.x - s * 0.26f, c.y + s * 0.20f, s * 0.52f, s * 0.08f},
+                             0.35f,
+                             8,
+                             style.fill);
+        return;
+    }
+
+    if (piece == PIECE_KNIGHT) {
+        DrawTriangle((Vector2){c.x - s * 0.24f, c.y + s * 0.27f},
+                     (Vector2){c.x + s * 0.24f, c.y + s * 0.27f},
+                     (Vector2){c.x - s * 0.05f, c.y - s * 0.30f},
+                     style.stroke);
+        DrawTriangle((Vector2){c.x - s * 0.20f, c.y + s * 0.23f},
+                     (Vector2){c.x + s * 0.20f, c.y + s * 0.23f},
+                     (Vector2){c.x - s * 0.02f, c.y - s * 0.24f},
+                     style.fill);
+        DrawCircleV((Vector2){c.x + s * 0.05f, c.y - s * 0.05f}, s * 0.05f, style.stroke);
+        DrawCircleV((Vector2){c.x + s * 0.05f, c.y - s * 0.05f}, s * 0.03f, style.fill);
+        DrawRectangleRounded((Rectangle){c.x - s * 0.30f, c.y + s * 0.22f, s * 0.60f, s * 0.11f},
+                             0.35f,
+                             8,
+                             style.stroke);
+        DrawRectangleRounded((Rectangle){c.x - s * 0.26f, c.y + s * 0.24f, s * 0.52f, s * 0.07f},
+                             0.35f,
+                             8,
+                             style.fill);
+        return;
+    }
+
+    if (piece == PIECE_BISHOP) {
+        DrawEllipse((int)c.x, (int)(c.y - s * 0.08f), (int)(s * 0.20f), (int)(s * 0.28f), style.stroke);
+        DrawEllipse((int)c.x, (int)(c.y - s * 0.08f), (int)(s * 0.16f), (int)(s * 0.24f), style.fill);
+        DrawCircleV((Vector2){c.x, c.y - s * 0.32f}, s * 0.10f, style.stroke);
+        DrawCircleV((Vector2){c.x, c.y - s * 0.32f}, s * 0.07f, style.fill);
+        DrawLineEx((Vector2){c.x - s * 0.07f, c.y - s * 0.22f},
+                   (Vector2){c.x + s * 0.07f, c.y - s * 0.08f},
+                   2.2f,
+                   style.stroke);
+        DrawRectangleRounded((Rectangle){c.x - s * 0.29f, c.y + s * 0.20f, s * 0.58f, s * 0.11f},
+                             0.35f,
+                             8,
+                             style.stroke);
+        DrawRectangleRounded((Rectangle){c.x - s * 0.25f, c.y + s * 0.22f, s * 0.50f, s * 0.07f},
+                             0.35f,
+                             8,
+                             style.fill);
+        return;
+    }
+
+    if (piece == PIECE_ROOK) {
+        DrawRectangleRounded((Rectangle){c.x - s * 0.24f, c.y - s * 0.16f, s * 0.48f, s * 0.43f},
+                             0.16f,
+                             8,
+                             style.stroke);
+        DrawRectangleRounded((Rectangle){c.x - s * 0.20f, c.y - s * 0.12f, s * 0.40f, s * 0.37f},
+                             0.16f,
+                             8,
+                             style.fill);
+        for (int i = -1; i <= 1; ++i) {
+            DrawRectangleRounded((Rectangle){c.x + (float)i * s * 0.14f - s * 0.05f, c.y - s * 0.30f, s * 0.10f, s * 0.13f},
+                                 0.2f,
+                                 6,
+                                 style.stroke);
+            DrawRectangleRounded((Rectangle){c.x + (float)i * s * 0.14f - s * 0.04f, c.y - s * 0.28f, s * 0.08f, s * 0.10f},
+                                 0.2f,
+                                 6,
+                                 style.fill);
+        }
+        DrawRectangleRounded((Rectangle){c.x - s * 0.32f, c.y + s * 0.20f, s * 0.64f, s * 0.11f},
+                             0.35f,
+                             8,
+                             style.stroke);
+        DrawRectangleRounded((Rectangle){c.x - s * 0.28f, c.y + s * 0.22f, s * 0.56f, s * 0.07f},
+                             0.35f,
+                             8,
+                             style.fill);
+        return;
+    }
+
+    if (piece == PIECE_QUEEN) {
+        DrawRectangleRounded((Rectangle){c.x - s * 0.23f, c.y - s * 0.06f, s * 0.46f, s * 0.34f},
+                             0.30f,
+                             8,
+                             style.stroke);
+        DrawRectangleRounded((Rectangle){c.x - s * 0.19f, c.y - s * 0.04f, s * 0.38f, s * 0.30f},
+                             0.30f,
+                             8,
+                             style.fill);
+        DrawTriangle((Vector2){c.x - s * 0.22f, c.y - s * 0.08f},
+                     (Vector2){c.x + s * 0.22f, c.y - s * 0.08f},
+                     (Vector2){c.x, c.y - s * 0.34f},
+                     style.stroke);
+        DrawTriangle((Vector2){c.x - s * 0.18f, c.y - s * 0.09f},
+                     (Vector2){c.x + s * 0.18f, c.y - s * 0.09f},
+                     (Vector2){c.x, c.y - s * 0.29f},
+                     style.fill);
+        DrawCircleV((Vector2){c.x - s * 0.16f, c.y - s * 0.28f}, s * 0.06f, style.stroke);
+        DrawCircleV((Vector2){c.x, c.y - s * 0.34f}, s * 0.06f, style.stroke);
+        DrawCircleV((Vector2){c.x + s * 0.16f, c.y - s * 0.28f}, s * 0.06f, style.stroke);
+        DrawCircleV((Vector2){c.x - s * 0.16f, c.y - s * 0.28f}, s * 0.04f, style.fill);
+        DrawCircleV((Vector2){c.x, c.y - s * 0.34f}, s * 0.04f, style.fill);
+        DrawCircleV((Vector2){c.x + s * 0.16f, c.y - s * 0.28f}, s * 0.04f, style.fill);
+        DrawRectangleRounded((Rectangle){c.x - s * 0.33f, c.y + s * 0.20f, s * 0.66f, s * 0.11f},
+                             0.35f,
+                             8,
+                             style.stroke);
+        DrawRectangleRounded((Rectangle){c.x - s * 0.29f, c.y + s * 0.22f, s * 0.58f, s * 0.07f},
+                             0.35f,
+                             8,
+                             style.fill);
+        return;
+    }
+
+    if (piece == PIECE_KING) {
+        DrawRectangleRounded((Rectangle){c.x - s * 0.19f, c.y - s * 0.07f, s * 0.38f, s * 0.35f},
+                             0.30f,
+                             8,
+                             style.stroke);
+        DrawRectangleRounded((Rectangle){c.x - s * 0.16f, c.y - s * 0.05f, s * 0.32f, s * 0.31f},
+                             0.30f,
+                             8,
+                             style.fill);
+        DrawRectangleRounded((Rectangle){c.x - s * 0.05f, c.y - s * 0.36f, s * 0.10f, s * 0.18f},
+                             0.25f,
+                             6,
+                             style.stroke);
+        DrawRectangleRounded((Rectangle){c.x - s * 0.03f, c.y - s * 0.34f, s * 0.06f, s * 0.15f},
+                             0.25f,
+                             6,
+                             style.fill);
+        DrawRectangleRounded((Rectangle){c.x - s * 0.14f, c.y - s * 0.30f, s * 0.28f, s * 0.08f},
+                             0.25f,
+                             6,
+                             style.stroke);
+        DrawRectangleRounded((Rectangle){c.x - s * 0.12f, c.y - s * 0.29f, s * 0.24f, s * 0.06f},
+                             0.25f,
+                             6,
+                             style.fill);
+        DrawRectangleRounded((Rectangle){c.x - s * 0.33f, c.y + s * 0.20f, s * 0.66f, s * 0.11f},
+                             0.35f,
+                             8,
+                             style.stroke);
+        DrawRectangleRounded((Rectangle){c.x - s * 0.29f, c.y + s * 0.22f, s * 0.58f, s * 0.07f},
+                             0.35f,
+                             8,
+                             style.fill);
+    }
+}
+
+/* Draws board coordinates around board edges. */
+static void draw_coordinates(const GuiPlayLayout* layout) {
+    const GuiPalette* palette = gui_palette();
+    int font_size = (layout->square_size >= 64.0f) ? 18 : 15;
+
+    for (int file = 0; file < 8; ++file) {
+        char text[2] = {(char)('a' + file), '\0'};
+        int tx = (int)(layout->board.x + (float)file * layout->square_size + layout->square_size - (float)font_size * 0.8f);
+        int ty = (int)(layout->board.y + layout->board.height + 6.0f);
+        DrawText(text, tx, ty, font_size, palette->text_secondary);
+    }
+
+    for (int rank = 0; rank < 8; ++rank) {
+        char text[2] = {(char)('1' + rank), '\0'};
+        int tx = (int)(layout->board.x - 18.0f);
+        int ty = (int)(layout->board.y + (7.0f - (float)rank) * layout->square_size + 6.0f);
+        DrawText(text, tx, ty, font_size, palette->text_secondary);
+    }
+}
+
+/* Draws captured pieces panel for one capturer side. */
+static void draw_captured_group(const Position* pos, Rectangle rect, Side capturer) {
+    const GuiPalette* palette = gui_palette();
+    Side captured_side = (capturer == SIDE_WHITE) ? SIDE_BLACK : SIDE_WHITE;
+    const char* title = (capturer == SIDE_WHITE) ? "White Captures" : "Black Captures";
+    const PieceType order[] = {PIECE_QUEEN, PIECE_ROOK, PIECE_BISHOP, PIECE_KNIGHT, PIECE_PAWN};
+    float icon_size = 24.0f;
+    float x = rect.x + 14.0f;
+    float y = rect.y + 38.0f;
+
+    draw_card(rect, palette->panel_alt, with_alpha(palette->panel_border, 0.9f));
+    DrawText(title, (int)rect.x + 12, (int)rect.y + 10, 20, palette->text_primary);
+
+    for (int i = 0; i < (int)(sizeof(order) / sizeof(order[0])); ++i) {
+        PieceType piece = order[i];
+        int total = initial_piece_count(piece);
+        int current = bit_count(pos->pieces[captured_side][piece]);
+        int captured = total - current;
+
+        for (int n = 0; n < captured; ++n) {
+            if (x + icon_size > rect.x + rect.width - 12.0f) {
+                x = rect.x + 14.0f;
+                y += icon_size + 8.0f;
+            }
+
+            draw_piece_shape(piece,
+                             captured_side,
+                             (Vector2){x + icon_size * 0.5f, y + icon_size * 0.5f},
+                             icon_size,
+                             0.95f);
+            x += icon_size + 8.0f;
+        }
+    }
+}
+
+GuiPlayLayout gui_get_play_layout(void) {
+    GuiPlayLayout layout;
+    float sw = (float)GetScreenWidth();
+    float sh = (float)GetScreenHeight();
+    float min_dim = (sw < sh) ? sw : sh;
+    float margin = min_dim * 0.022f;
+    float sidebar_width;
+    float board_width_space;
+    float board_height_space;
+    float board_size;
+    int square_int;
+
+    if (margin < 16.0f) {
+        margin = 16.0f;
+    }
+
+    sidebar_width = sw * 0.26f;
+    if (sidebar_width < 260.0f) {
+        sidebar_width = 260.0f;
+    }
+    if (sidebar_width > 360.0f) {
+        sidebar_width = 360.0f;
+    }
+
+    layout.sidebar = (Rectangle){
+        sw - margin - sidebar_width,
+        margin,
+        sidebar_width,
+        sh - margin * 2.0f
+    };
+
+    board_width_space = layout.sidebar.x - margin * 2.0f;
+    board_height_space = sh - margin * 2.0f;
+
+    board_size = (board_width_space < board_height_space) ? board_width_space : board_height_space;
+    square_int = (int)(board_size / 8.0f);
+    if (square_int < 48) {
+        square_int = 48;
+    }
+    board_size = (float)(square_int * 8);
+
+    layout.square_size = (float)square_int;
+    layout.board = (Rectangle){
+        margin + (board_width_space - board_size) * 0.5f,
+        margin + (board_height_space - board_size) * 0.5f,
+        board_size,
+        board_size
+    };
+
+    return layout;
+}
+
+int gui_theme_count(void) {
+    return (int)(sizeof(g_palettes) / sizeof(g_palettes[0]));
+}
+
+const char* gui_theme_name(int index) {
+    int clamped = clamp_theme_index(index);
+    return g_palettes[clamped].name;
+}
+
+int gui_get_active_theme(void) {
+    return g_active_theme;
+}
+
+void gui_set_active_theme(int index) {
+    g_active_theme = clamp_theme_index(index);
+}
+
+const GuiPalette* gui_palette(void) {
+    return &g_palettes[g_active_theme];
+}
+
+void gui_draw_background(void) {
+    const GuiPalette* palette = gui_palette();
+    float sw = (float)GetScreenWidth();
+    float sh = (float)GetScreenHeight();
+    float orb = ((sw < sh) ? sw : sh) * 0.22f;
+
+    DrawRectangleGradientV(0, 0, (int)sw, (int)sh, palette->bg_top, palette->bg_bottom);
+    DrawCircleV((Vector2){sw * 0.10f, sh * 0.12f}, orb, with_alpha(palette->accent, 0.08f));
+    DrawCircleV((Vector2){sw * 0.88f, sh * 0.86f}, orb * 1.1f, with_alpha(palette->accent_hover, 0.08f));
+    DrawCircleV((Vector2){sw * 0.78f, sh * 0.20f}, orb * 0.65f, with_alpha(palette->panel_border, 0.07f));
+}
+
 int gui_square_from_mouse(Vector2 mouse) {
-    Rectangle rect = board_rect();
+    GuiPlayLayout layout = gui_get_play_layout();
     int file;
     int rank_from_top;
     int rank;
 
-    if (!CheckCollisionPointRec(mouse, rect)) {
+    if (!CheckCollisionPointRec(mouse, layout.board)) {
         return -1;
     }
 
-    file = ((int)mouse.x - BOARD_ORIGIN_X) / SQUARE_PIXELS;
-    rank_from_top = ((int)mouse.y - BOARD_ORIGIN_Y) / SQUARE_PIXELS;
+    file = (int)((mouse.x - layout.board.x) / layout.square_size);
+    rank_from_top = (int)((mouse.y - layout.board.y) / layout.square_size);
 
     if (file < 0 || file > 7 || rank_from_top < 0 || rank_from_top > 7) {
         return -1;
@@ -41,81 +528,99 @@ int gui_square_from_mouse(Vector2 mouse) {
     return (rank << 3) | file;
 }
 
-/* Draws board coordinate labels around the chessboard. */
-static void draw_coordinates(void) {
-    for (int file = 0; file < 8; ++file) {
-        char text[2] = {(char)('a' + file), '\0'};
-        DrawText(text,
-                 BOARD_ORIGIN_X + file * SQUARE_PIXELS + SQUARE_PIXELS - 14,
-                 BOARD_ORIGIN_Y + BOARD_PIXELS + 6,
-                 14,
-                 DARKGRAY);
-    }
+void gui_draw_board(const ChessApp* app) {
+    const GuiPalette* palette = gui_palette();
+    GuiPlayLayout layout = gui_get_play_layout();
+    Rectangle info_card = {
+        layout.sidebar.x,
+        layout.sidebar.y,
+        layout.sidebar.width,
+        layout.sidebar.height
+    };
+    float piece_size = layout.square_size * 0.88f;
 
-    for (int rank = 0; rank < 8; ++rank) {
-        char text[2] = {(char)('1' + rank), '\0'};
-        DrawText(text,
-                 BOARD_ORIGIN_X - 18,
-                 BOARD_ORIGIN_Y + (7 - rank) * SQUARE_PIXELS + 6,
-                 14,
-                 DARKGRAY);
-    }
-}
-
-/* True when square is a legal destination for the selected source square. */
-static bool is_target_for_selected(const MoveList* legal_moves, int selected_square, int square) {
-    if (selected_square < 0) {
-        return false;
-    }
-
-    for (int i = 0; i < legal_moves->count; ++i) {
-        if (legal_moves->moves[i].from == selected_square && legal_moves->moves[i].to == square) {
-            return true;
-        }
-    }
-
-    return false;
-}
-
-/* Draws chessboard, highlights, and piece symbols. */
-void gui_draw_board(const Position* pos, int selected_square, const MoveList* legal_moves) {
-    Color light_square = (Color){238, 219, 180, 255};
-    Color dark_square = (Color){181, 136, 99, 255};
+    draw_card(info_card, with_alpha(palette->panel, 0.92f), palette->panel_border);
 
     for (int rank = 7; rank >= 0; --rank) {
         for (int file = 0; file < 8; ++file) {
             int square = (rank << 3) | file;
-            int draw_x = BOARD_ORIGIN_X + file * SQUARE_PIXELS;
-            int draw_y = BOARD_ORIGIN_Y + (7 - rank) * SQUARE_PIXELS;
+            Rectangle rect = square_rect(&layout, square);
             bool light = ((rank + file) & 1) == 0;
-            Color square_color = light ? light_square : dark_square;
+            Color sq_color = light ? palette->board_light : palette->board_dark;
 
-            DrawRectangle(draw_x, draw_y, SQUARE_PIXELS, SQUARE_PIXELS, square_color);
-
-            if (square == selected_square) {
-                DrawRectangleLinesEx(
-                    (Rectangle){(float)draw_x, (float)draw_y, (float)SQUARE_PIXELS, (float)SQUARE_PIXELS},
-                    3.0f,
-                    GOLD);
-            } else if (is_target_for_selected(legal_moves, selected_square, square)) {
-                DrawCircle(draw_x + SQUARE_PIXELS / 2,
-                           draw_y + SQUARE_PIXELS / 2,
-                           10.0f,
-                           (Color){30, 30, 30, 130});
+            if (square == app->last_move_from || square == app->last_move_to) {
+                sq_color = ColorAlphaBlend(sq_color, with_alpha(palette->accent, 0.20f), WHITE);
             }
 
-            {
-                Side side;
-                PieceType piece;
-                if (position_piece_at(pos, square, &side, &piece)) {
-                    char symbol[2] = {piece_to_char(side, piece), '\0'};
-                    Color piece_color = (side == SIDE_WHITE) ? (Color){245, 245, 245, 255} : (Color){20, 20, 20, 255};
-                    DrawText(symbol, draw_x + SQUARE_PIXELS / 2 - 10, draw_y + SQUARE_PIXELS / 2 - 18, 36, piece_color);
-                }
+            DrawRectangleRec(rect, sq_color);
+
+            if (square == app->selected_square) {
+                DrawRectangleLinesEx(rect, 3.0f, palette->selection);
+            } else if (is_target_for_selected(app, square)) {
+                DrawCircleV((Vector2){rect.x + rect.width * 0.5f, rect.y + rect.height * 0.5f},
+                            rect.width * 0.15f,
+                            palette->legal_hint);
             }
         }
     }
 
-    DrawRectangleLinesEx(board_rect(), 2.0f, BLACK);
-    draw_coordinates();
+    DrawRectangleRoundedLinesEx(layout.board, 0.02f, 8, 2.0f, palette->board_outline);
+    draw_coordinates(&layout);
+
+    for (int square = 0; square < BOARD_SQUARES; ++square) {
+        Side side;
+        PieceType piece;
+        Vector2 center;
+
+        if (!position_piece_at(&app->position, square, &side, &piece)) {
+            continue;
+        }
+
+        if (app->move_animating && square == app->move_anim_to) {
+            continue;
+        }
+
+        center = square_center(&layout, square);
+        draw_piece_shape(piece, side, center, piece_size, 1.0f);
+    }
+
+    if (app->move_animating) {
+        Vector2 from = square_center(&layout, app->move_anim_from);
+        Vector2 to = square_center(&layout, app->move_anim_to);
+        float t = app->move_anim_progress;
+        float eased;
+        Vector2 current;
+
+        if (t < 0.0f) {
+            t = 0.0f;
+        }
+        if (t > 1.0f) {
+            t = 1.0f;
+        }
+
+        eased = t * t * (3.0f - 2.0f * t);
+        current.x = from.x + (to.x - from.x) * eased;
+        current.y = from.y + (to.y - from.y) * eased;
+
+        draw_piece_shape(app->move_anim_piece, app->move_anim_side, current, piece_size, 1.0f);
+    }
+
+    {
+        float capture_height = layout.sidebar.height * 0.26f;
+        Rectangle top = {
+            layout.sidebar.x + 12.0f,
+            layout.sidebar.y + 70.0f,
+            layout.sidebar.width - 24.0f,
+            capture_height
+        };
+        Rectangle bottom = {
+            layout.sidebar.x + 12.0f,
+            layout.sidebar.y + layout.sidebar.height - capture_height - 14.0f,
+            layout.sidebar.width - 24.0f,
+            capture_height
+        };
+
+        draw_captured_group(&app->position, top, SIDE_WHITE);
+        draw_captured_group(&app->position, bottom, SIDE_BLACK);
+    }
 }

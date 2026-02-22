@@ -18,6 +18,7 @@ THREAD_FLAGS ?= -pthread
 
 SRC = \
 	src/main.c \
+	src/core/audio.c \
 	src/core/game_state.c \
 	src/core/main_loop.c \
 	src/engine/bitboard.c \
@@ -28,6 +29,7 @@ SRC = \
 	src/gui/screens/menu_screen.c \
 	src/gui/screens/play_screen.c \
 	src/gui/screens/lobby_screen.c \
+	src/gui/screens/settings_screen.c \
 	src/network/client.c \
 	src/network/matchmaker.c \
 	src/data/profile_mgr.c

@@ -12,6 +12,34 @@
 
 struct ChessApp;
 
+typedef struct GuiPalette {
+    const char* name;
+    Color bg_top;
+    Color bg_bottom;
+    Color panel;
+    Color panel_alt;
+    Color panel_border;
+    Color text_primary;
+    Color text_secondary;
+    Color accent;
+    Color accent_hover;
+    Color board_light;
+    Color board_dark;
+    Color board_outline;
+    Color selection;
+    Color legal_hint;
+    Color white_piece_fill;
+    Color white_piece_stroke;
+    Color black_piece_fill;
+    Color black_piece_stroke;
+} GuiPalette;
+
+typedef struct GuiPlayLayout {
+    Rectangle board;
+    Rectangle sidebar;
+    float square_size;
+} GuiPlayLayout;
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -21,13 +49,23 @@ bool gui_button(Rectangle bounds, const char* label);
 void gui_input_box(Rectangle bounds, char* buffer, int capacity, bool active);
 
 /* Board rendering and coordinate conversion helpers. */
-void gui_draw_board(const Position* pos, int selected_square, const MoveList* legal_moves);
+void gui_draw_board(const struct ChessApp* app);
 int gui_square_from_mouse(Vector2 mouse);
+GuiPlayLayout gui_get_play_layout(void);
+
+/* Theme and style accessors. */
+int gui_theme_count(void);
+const char* gui_theme_name(int index);
+int gui_get_active_theme(void);
+void gui_set_active_theme(int index);
+const GuiPalette* gui_palette(void);
+void gui_draw_background(void);
 
 /* Top-level screen render/update handlers. */
 void gui_screen_menu(struct ChessApp* app);
 void gui_screen_play(struct ChessApp* app);
 void gui_screen_lobby(struct ChessApp* app);
+void gui_screen_settings(struct ChessApp* app);
 
 #ifdef __cplusplus
 }

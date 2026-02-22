@@ -9,6 +9,7 @@
 
 #include "game_state.h"
 #include "gui.h"
+#include "audio.h"
 
 /* Upper bound to avoid spending too much frame time draining UDP queue. */
 #define MAX_NET_PACKETS_PER_FRAME 16
@@ -123,6 +124,7 @@ static void maybe_process_network(ChessApp* app) {
         if (packet.type == NET_MSG_JOIN_REQUEST) {
             if (app->screen == SCREEN_LOBBY && app->network.connected && app->network.is_host) {
                 snprintf(app->lobby_status, sizeof(app->lobby_status), "Guest joined. Match starts now.");
+                audio_play(AUDIO_SFX_LOBBY_JOIN);
                 app->human_side = SIDE_WHITE;
                 app_start_game(app, MODE_ONLINE);
             }
@@ -132,6 +134,7 @@ static void maybe_process_network(ChessApp* app) {
         if (packet.type == NET_MSG_JOIN_ACCEPT) {
             if (app->screen == SCREEN_LOBBY && app->network.connected && !app->network.is_host) {
                 snprintf(app->lobby_status, sizeof(app->lobby_status), "Connected to host. Match starts now.");
+                audio_play(AUDIO_SFX_LOBBY_JOIN);
                 app->human_side = SIDE_BLACK;
                 app_start_game(app, MODE_ONLINE);
             }
@@ -168,15 +171,22 @@ int run_main_loop(void) {
     AIWorker worker;
     ai_worker_init(&worker);
 
-    InitWindow(960, 760, "ChessProject - C Chess Engine");
+    SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT);
+    InitWindow(1280, 820, "ChessProject - C Chess Engine");
+    SetWindowMinSize(980, 680);
     SetTargetFPS(60);
+    audio_init();
+    audio_set_enabled(app.sound_enabled);
+    audio_set_master_volume(app.sound_volume);
 
     while (!WindowShouldClose()) {
         maybe_process_network(&app);
         maybe_process_ai_turn(&app, &worker);
+        app_tick(&app, GetFrameTime());
+        gui_set_active_theme(app.theme);
 
         BeginDrawing();
-        ClearBackground((Color){247, 249, 252, 255});
+        gui_draw_background();
 
         if (app.screen == SCREEN_MENU) {
             gui_screen_menu(&app);
@@ -184,6 +194,8 @@ int run_main_loop(void) {
             gui_screen_play(&app);
         } else if (app.screen == SCREEN_LOBBY) {
             gui_screen_lobby(&app);
+        } else if (app.screen == SCREEN_SETTINGS) {
+            gui_screen_settings(&app);
         }
 
         EndDrawing();
@@ -192,6 +204,7 @@ int run_main_loop(void) {
     ai_worker_shutdown(&worker);
     profile_save(&app.profile, "profile.dat");
     network_client_shutdown(&app.network);
+    audio_shutdown();
 
     CloseWindow();
     return 0;
