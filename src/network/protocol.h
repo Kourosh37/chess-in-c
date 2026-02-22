@@ -19,7 +19,8 @@ typedef enum NetMsgType {
     NET_MSG_SYNC = 5,
     NET_MSG_ERROR = 6,
     NET_MSG_PING = 7,
-    NET_MSG_PONG = 8
+    NET_MSG_PONG = 8,
+    NET_MSG_LEAVE = 9
 } NetMsgType;
 
 /* Packed message for direct UDP transfer. */

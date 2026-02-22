@@ -58,6 +58,12 @@ void app_init(ChessApp* app) {
 
     app->lobby_input[0] = '\0';
     app->lobby_code[0] = '\0';
+    app->online_match_code[0] = '\0';
+    app->online_match_active = false;
+    app->leave_confirm_open = false;
+    snprintf(app->online_runtime_status,
+             sizeof(app->online_runtime_status),
+             "No active online match.");
 
     if (network_client_init(&app->network, 0)) {
         snprintf(app->lobby_status, sizeof(app->lobby_status), "Direct P2P mode: no central server.");
@@ -78,6 +84,20 @@ void app_start_game(ChessApp* app, GameMode mode) {
     app->move_anim_progress = 1.0f;
     app->last_move_from = -1;
     app->last_move_to = -1;
+    app->leave_confirm_open = false;
+
+    if (mode == MODE_ONLINE) {
+        app->online_match_active = true;
+        if (app->network.connected) {
+            snprintf(app->online_runtime_status,
+                     sizeof(app->online_runtime_status),
+                     "Online match active.");
+        } else {
+            snprintf(app->online_runtime_status,
+                     sizeof(app->online_runtime_status),
+                     "Online match disconnected.");
+        }
+    }
 
     position_set_start(&app->position);
     app_refresh_legal_moves(app);
@@ -177,4 +197,29 @@ void app_tick(ChessApp* app, float delta_time) {
         app->move_anim_progress = 1.0f;
         app->move_animating = false;
     }
+}
+
+/* Leaves and clears currently tracked online match session state. */
+void app_online_end_match(ChessApp* app, bool notify_peer) {
+    if (app == NULL) {
+        return;
+    }
+
+    if (notify_peer) {
+        network_client_send_leave(&app->network);
+    }
+
+    app->network.connected = false;
+    app->network.peer_addr_len = 0;
+    app->network.is_host = false;
+
+    app->online_match_active = false;
+    app->online_match_code[0] = '\0';
+    app->lobby_code[0] = '\0';
+    app->leave_confirm_open = false;
+    app->mode = MODE_SINGLE;
+
+    snprintf(app->online_runtime_status,
+             sizeof(app->online_runtime_status),
+             "Online match closed.");
 }

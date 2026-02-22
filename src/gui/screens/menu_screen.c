@@ -16,7 +16,9 @@ void gui_screen_menu(struct ChessApp* app) {
     Rectangle single_btn;
     Rectangle local_btn;
     Rectangle online_btn;
+    Rectangle resume_btn;
     Rectangle settings_btn;
+    bool has_resume = (app->mode == MODE_ONLINE && app->online_match_active);
 
     if (panel_w < 520.0f) {
         panel_w = 520.0f;
@@ -27,8 +29,8 @@ void gui_screen_menu(struct ChessApp* app) {
     if (panel_h < 480.0f) {
         panel_h = 480.0f;
     }
-    if (panel_h > 640.0f) {
-        panel_h = 640.0f;
+    if (panel_h > 700.0f) {
+        panel_h = 700.0f;
     }
 
     panel = (Rectangle){
@@ -59,14 +61,21 @@ void gui_screen_menu(struct ChessApp* app) {
     single_btn = (Rectangle){panel.x + 42.0f, panel.y + 205.0f, panel.width - 84.0f, 58.0f};
     local_btn = (Rectangle){panel.x + 42.0f, panel.y + 276.0f, panel.width - 84.0f, 58.0f};
     online_btn = (Rectangle){panel.x + 42.0f, panel.y + 347.0f, panel.width - 84.0f, 58.0f};
-    settings_btn = (Rectangle){panel.x + 42.0f, panel.y + 430.0f, panel.width - 84.0f, 58.0f};
+    resume_btn = (Rectangle){panel.x + 42.0f, panel.y + 418.0f, panel.width - 84.0f, 58.0f};
+    settings_btn = (Rectangle){panel.x + 42.0f, panel.y + (has_resume ? 489.0f : 430.0f), panel.width - 84.0f, 58.0f};
 
     if (gui_button(single_btn, "Single Player")) {
+        if (app->online_match_active) {
+            app_online_end_match(app, true);
+        }
         app->human_side = SIDE_WHITE;
         app_start_game(app, MODE_SINGLE);
     }
 
     if (gui_button(local_btn, "Local Multiplayer")) {
+        if (app->online_match_active) {
+            app_online_end_match(app, true);
+        }
         app_start_game(app, MODE_LOCAL);
     }
 
@@ -78,8 +87,20 @@ void gui_screen_menu(struct ChessApp* app) {
         snprintf(app->lobby_status, sizeof(app->lobby_status), "Host or join with invite code.");
     }
 
+    if (has_resume && gui_button(resume_btn, "Resume Online Match")) {
+        app->screen = SCREEN_PLAY;
+    }
+
     if (gui_button(settings_btn, "Settings")) {
         app->screen = SCREEN_SETTINGS;
+    }
+
+    if (has_resume) {
+        DrawText(app->online_runtime_status,
+                 (int)panel.x + 42,
+                 (int)panel.y + panel.height - 74,
+                 18,
+                 palette->text_secondary);
     }
 
     DrawText("Tip: Settings page contains AI depth, randomness, theme, and audio controls.",

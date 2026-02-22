@@ -316,6 +316,24 @@ bool network_client_send_move(NetworkClient* client, Move move) {
     return send_packet(client, &packet, (const struct sockaddr*)client->peer_addr_storage, client->peer_addr_len);
 }
 
+/* Sends a leave packet to peer before local user exits an online match. */
+bool network_client_send_leave(NetworkClient* client) {
+    NetPacket packet;
+
+    if (client == NULL || !client->initialized || client->peer_addr_len <= 0) {
+        return false;
+    }
+
+    memset(&packet, 0, sizeof(packet));
+    packet.type = NET_MSG_LEAVE;
+    packet.sequence = ++client->sequence;
+
+    return send_packet(client,
+                       &packet,
+                       (const struct sockaddr*)client->peer_addr_storage,
+                       client->peer_addr_len);
+}
+
 /* Polls one incoming packet and updates host/guest session state machine. */
 bool network_client_poll(NetworkClient* client, NetPacket* out_packet) {
     net_socket_t socket_fd;
@@ -368,6 +386,17 @@ bool network_client_poll(NetworkClient* client, NetPacket* out_packet) {
     if (packet.type == NET_MSG_MOVE && client->peer_addr_len > 0) {
         if (!sockaddr_equals((const struct sockaddr*)client->peer_addr_storage, (const struct sockaddr*)&from)) {
             return false;
+        }
+    }
+
+    if (packet.type == NET_MSG_LEAVE && client->peer_addr_len > 0) {
+        if (!sockaddr_equals((const struct sockaddr*)client->peer_addr_storage, (const struct sockaddr*)&from)) {
+            return false;
+        }
+
+        client->connected = false;
+        if (client->is_host) {
+            client->peer_addr_len = 0;
         }
     }
 

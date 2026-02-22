@@ -1,6 +1,7 @@
 #include "gui.h"
 
 #include <math.h>
+#include <string.h>
 
 #include "game_state.h"
 
@@ -76,6 +77,27 @@ static const GuiPalette g_palettes[] = {
 };
 
 static int g_active_theme = 0;
+static const char* g_piece_texture_paths[2][6] = {
+    {
+        "assets/pieces/staunton/wp.png",
+        "assets/pieces/staunton/wn.png",
+        "assets/pieces/staunton/wb.png",
+        "assets/pieces/staunton/wr.png",
+        "assets/pieces/staunton/wq.png",
+        "assets/pieces/staunton/wk.png"
+    },
+    {
+        "assets/pieces/staunton/bp.png",
+        "assets/pieces/staunton/bn.png",
+        "assets/pieces/staunton/bb.png",
+        "assets/pieces/staunton/br.png",
+        "assets/pieces/staunton/bq.png",
+        "assets/pieces/staunton/bk.png"
+    }
+};
+static Texture2D g_piece_textures[2][6];
+static bool g_piece_texture_ready[2][6];
+static bool g_piece_texture_init_attempted = false;
 
 /* Clamps index into available palette range. */
 static int clamp_theme_index(int index) {
@@ -157,6 +179,77 @@ static void draw_piece_foundation(Vector2 c, float s, Color fill, Color stroke, 
 static void draw_piece_gloss(Vector2 c, float radius, Color fill, float alpha) {
     Color gloss = with_alpha(adjust_color(fill, 42, 1.0f), 0.45f * alpha);
     DrawCircleV((Vector2){c.x - radius * 0.34f, c.y - radius * 0.30f}, radius * 0.34f, gloss);
+}
+
+/* Attempts one-time loading of local piece textures for realistic rendering. */
+static void ensure_piece_textures_loaded(void) {
+    if (g_piece_texture_init_attempted) {
+        return;
+    }
+
+    g_piece_texture_init_attempted = true;
+    memset(g_piece_textures, 0, sizeof(g_piece_textures));
+    memset(g_piece_texture_ready, 0, sizeof(g_piece_texture_ready));
+
+    for (int side = 0; side < 2; ++side) {
+        for (int piece = 0; piece < 6; ++piece) {
+            const char* path = g_piece_texture_paths[side][piece];
+
+            if (!FileExists(path)) {
+                continue;
+            }
+
+            g_piece_textures[side][piece] = LoadTexture(path);
+            g_piece_texture_ready[side][piece] = (g_piece_textures[side][piece].id != 0);
+        }
+    }
+}
+
+/* Draws a realistic piece texture if loaded, returns false when unavailable. */
+static bool draw_piece_texture(PieceType piece, Side side, Vector2 center, float size, float alpha) {
+    Texture2D tex;
+    Rectangle src;
+    Rectangle dst;
+    Vector2 origin;
+    float ratio;
+
+    if (side < SIDE_WHITE || side > SIDE_BLACK) {
+        return false;
+    }
+    if (piece < PIECE_PAWN || piece > PIECE_KING) {
+        return false;
+    }
+
+    ensure_piece_textures_loaded();
+    if (!g_piece_texture_ready[side][piece]) {
+        return false;
+    }
+
+    tex = g_piece_textures[side][piece];
+    if (tex.width <= 0 || tex.height <= 0) {
+        return false;
+    }
+
+    ratio = (float)tex.width / (float)tex.height;
+    dst.height = size * 0.94f;
+    dst.width = dst.height * ratio;
+    if (dst.width > size * 0.94f) {
+        dst.width = size * 0.94f;
+        dst.height = dst.width / ratio;
+    }
+    dst.x = center.x;
+    dst.y = center.y + size * 0.02f;
+
+    origin = (Vector2){dst.width * 0.5f, dst.height * 0.5f};
+    src = (Rectangle){0.0f, 0.0f, (float)tex.width, (float)tex.height};
+
+    DrawEllipse((int)center.x,
+                (int)(center.y + size * 0.34f),
+                (int)(size * 0.29f),
+                (int)(size * 0.075f),
+                with_alpha(BLACK, 0.16f * alpha));
+    DrawTexturePro(tex, src, dst, origin, 0.0f, with_alpha(WHITE, alpha));
+    return true;
 }
 
 /* Converts board square index to rectangle in pixel coordinates. */
@@ -244,6 +337,10 @@ static void draw_piece_shape(PieceType piece, Side side, Vector2 center, float s
     bool compact = s < 30.0f;
     Vector2 c = center;
     Vector2 shadow_offset = {2.2f, 2.0f};
+
+    if (draw_piece_texture(piece, side, center, size, alpha)) {
+        return;
+    }
 
     DrawEllipse((int)(c.x + shadow_offset.x),
                 (int)(c.y + s * 0.35f + shadow_offset.y),

@@ -37,6 +37,9 @@ typedef struct ChessApp {
     char lobby_input[INVITE_CODE_LEN + 1];
     bool lobby_input_active;
     char lobby_status[96];
+    bool online_match_active;
+    char online_match_code[INVITE_CODE_LEN + 1];
+    char online_runtime_status[128];
 
     bool sound_enabled;
     float sound_volume;
@@ -51,6 +54,8 @@ typedef struct ChessApp {
     PieceType move_anim_piece;
     float move_anim_progress;
     float move_anim_duration;
+
+    bool leave_confirm_open;
 } ChessApp;
 
 /* App lifecycle and game flow helpers. */
@@ -62,5 +67,6 @@ void app_refresh_legal_moves(ChessApp* app);
 bool app_apply_move(ChessApp* app, Move move);
 bool app_is_human_turn(const ChessApp* app);
 void app_tick(ChessApp* app, float delta_time);
+void app_online_end_match(ChessApp* app, bool notify_peer);
 
 #endif

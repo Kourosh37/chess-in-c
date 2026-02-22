@@ -122,21 +122,58 @@ static void maybe_process_network(ChessApp* app) {
         processed++;
 
         if (packet.type == NET_MSG_JOIN_REQUEST) {
-            if (app->screen == SCREEN_LOBBY && app->network.connected && app->network.is_host) {
-                snprintf(app->lobby_status, sizeof(app->lobby_status), "Guest joined. Match starts now.");
+            if (app->network.connected && app->network.is_host) {
                 audio_play(AUDIO_SFX_LOBBY_JOIN);
-                app->human_side = SIDE_WHITE;
-                app_start_game(app, MODE_ONLINE);
+
+                if (app->mode == MODE_ONLINE && app->online_match_active) {
+                    snprintf(app->online_runtime_status,
+                             sizeof(app->online_runtime_status),
+                             "Opponent reconnected.");
+                    snprintf(app->lobby_status,
+                             sizeof(app->lobby_status),
+                             "Opponent reconnected to active match.");
+                } else if (app->screen == SCREEN_LOBBY) {
+                    snprintf(app->lobby_status, sizeof(app->lobby_status), "Guest joined. Match starts now.");
+                    app->human_side = SIDE_WHITE;
+                    app->online_match_active = true;
+                    strncpy(app->online_match_code, app->lobby_code, INVITE_CODE_LEN);
+                    app->online_match_code[INVITE_CODE_LEN] = '\0';
+                    snprintf(app->online_runtime_status,
+                             sizeof(app->online_runtime_status),
+                             "Opponent connected. Match is live.");
+                    app_start_game(app, MODE_ONLINE);
+                }
             }
             continue;
         }
 
         if (packet.type == NET_MSG_JOIN_ACCEPT) {
-            if (app->screen == SCREEN_LOBBY && app->network.connected && !app->network.is_host) {
-                snprintf(app->lobby_status, sizeof(app->lobby_status), "Connected to host. Match starts now.");
+            if (app->network.connected && !app->network.is_host) {
                 audio_play(AUDIO_SFX_LOBBY_JOIN);
-                app->human_side = SIDE_BLACK;
-                app_start_game(app, MODE_ONLINE);
+
+                if (app->mode == MODE_ONLINE && app->online_match_active) {
+                    snprintf(app->online_runtime_status,
+                             sizeof(app->online_runtime_status),
+                             "Reconnected to host.");
+                    snprintf(app->lobby_status,
+                             sizeof(app->lobby_status),
+                             "Reconnected to host.");
+                } else if (app->screen == SCREEN_LOBBY) {
+                    snprintf(app->lobby_status, sizeof(app->lobby_status), "Connected to host. Match starts now.");
+                    app->human_side = SIDE_BLACK;
+                    app->online_match_active = true;
+                    if (packet.invite_code[0] != '\0') {
+                        strncpy(app->online_match_code, packet.invite_code, INVITE_CODE_LEN);
+                        app->online_match_code[INVITE_CODE_LEN] = '\0';
+                    } else {
+                        strncpy(app->online_match_code, app->lobby_input, INVITE_CODE_LEN);
+                        app->online_match_code[INVITE_CODE_LEN] = '\0';
+                    }
+                    snprintf(app->online_runtime_status,
+                             sizeof(app->online_runtime_status),
+                             "Connected to host. Match is live.");
+                    app_start_game(app, MODE_ONLINE);
+                }
             }
             continue;
         }
@@ -149,7 +186,7 @@ static void maybe_process_network(ChessApp* app) {
         }
 
         if (packet.type == NET_MSG_MOVE) {
-            if (app->mode == MODE_ONLINE && app->screen == SCREEN_PLAY && !app->game_over) {
+            if (app->mode == MODE_ONLINE && app->online_match_active && !app->game_over) {
                 Move move;
                 move.from = packet.from;
                 move.to = packet.to;
@@ -158,6 +195,21 @@ static void maybe_process_network(ChessApp* app) {
                 move.score = 0;
 
                 app_apply_move(app, move);
+            }
+            continue;
+        }
+
+        if (packet.type == NET_MSG_LEAVE) {
+            if (app->mode == MODE_ONLINE && app->online_match_active) {
+                app->online_match_active = false;
+                app->leave_confirm_open = false;
+                app->network.connected = false;
+                snprintf(app->online_runtime_status,
+                         sizeof(app->online_runtime_status),
+                         "Opponent left the match.");
+                snprintf(app->lobby_status,
+                         sizeof(app->lobby_status),
+                         "Opponent left the match. You can host/join a new game.");
             }
         }
     }
@@ -199,6 +251,10 @@ int run_main_loop(void) {
         }
 
         EndDrawing();
+    }
+
+    if (app.mode == MODE_ONLINE && app.online_match_active) {
+        network_client_send_leave(&app.network);
     }
 
     ai_worker_shutdown(&worker);
