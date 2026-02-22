@@ -850,6 +850,7 @@ static void draw_coordinates(const GuiPlayLayout* layout) {
     float band;
     Rectangle frame = coordinate_frame_rect(layout, &band);
     int font_size = (int)(band * 0.62f);
+    int text_h;
     int top_y;
     int bottom_y;
 
@@ -860,8 +861,9 @@ static void draw_coordinates(const GuiPlayLayout* layout) {
         font_size = 24;
     }
 
-    top_y = (int)(frame.y + (band - (float)font_size) * 0.5f - 1.0f);
-    bottom_y = (int)(frame.y + frame.height - band + (band - (float)font_size) * 0.5f - 1.0f);
+    text_h = gui_measure_text_height(font_size);
+    top_y = (int)(frame.y + (band - (float)text_h) * 0.5f);
+    bottom_y = (int)(frame.y + frame.height - band + (band - (float)text_h) * 0.5f);
 
     for (int file = 0; file < 8; ++file) {
         char text[2] = {(char)('a' + file), '\0'};
@@ -877,7 +879,7 @@ static void draw_coordinates(const GuiPlayLayout* layout) {
         char text[2] = {(char)('8' - row), '\0'};
         float cy = layout->board.y + ((float)row + 0.5f) * layout->square_size;
         int text_w = gui_measure_text(text, font_size);
-        int y = (int)(cy - (float)font_size * 0.5f - 1.0f);
+        int y = (int)(cy - (float)text_h * 0.5f);
         int left_x = (int)(frame.x + (band - (float)text_w) * 0.5f);
         int right_x = (int)(frame.x + frame.width - band + (band - (float)text_w) * 0.5f);
 

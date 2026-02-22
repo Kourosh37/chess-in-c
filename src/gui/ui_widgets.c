@@ -156,6 +156,8 @@ static void input_menu_update(void) {
             item_h
         };
         bool hovered = CheckCollisionPointRec(mouse, item);
+        int font_size = 20;
+        int text_h = gui_measure_text_height(font_size);
 
         if (hovered) {
             DrawRectangleRounded(item, 0.14f, 8, Fade(palette->accent, 0.18f));
@@ -163,8 +165,8 @@ static void input_menu_update(void) {
 
         gui_draw_text(labels[i],
                       (int)item.x + 12,
-                      (int)(item.y + item.height * 0.5f - 10.0f),
-                      20,
+                      (int)(item.y + (item.height - (float)text_h) * 0.5f),
+                      font_size,
                       palette->text_primary);
 
         if (hovered && IsMouseButtonReleased(MOUSE_LEFT_BUTTON)) {
@@ -241,6 +243,7 @@ bool gui_button(Rectangle bounds, const char* label) {
     Color border = brighten(base, -28);
     int font_size = (bounds.height >= 56.0f) ? 24 : 20;
     int text_width = gui_measure_text(label, font_size);
+    int text_h = gui_measure_text_height(font_size);
 
     if (hovered) {
         SetMouseCursor(MOUSE_CURSOR_POINTING_HAND);
@@ -255,7 +258,7 @@ bool gui_button(Rectangle bounds, const char* label) {
 
     gui_draw_text(label,
              (int)(bounds.x + bounds.width * 0.5f - (float)text_width * 0.5f),
-             (int)(bounds.y + bounds.height * 0.5f - (float)font_size * 0.5f),
+             (int)(bounds.y + (bounds.height - (float)text_h) * 0.5f),
              font_size,
              RAYWHITE);
 
@@ -405,6 +408,8 @@ void gui_input_box(Rectangle bounds, char* buffer, int capacity, bool active) {
     Color border = active ? palette->accent : palette->panel_border;
     bool ctrl_down = IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL);
     bool has_selection = input_has_selection(buffer);
+    int text_size = 24;
+    int text_h = gui_measure_text_height(text_size);
 
     g_input_box_used_this_frame = true;
 
@@ -488,11 +493,17 @@ void gui_input_box(Rectangle bounds, char* buffer, int capacity, bool active) {
         DrawRectangleRounded(selection, 0.10f, 8, Fade(palette->accent, 0.18f));
     }
 
-    gui_draw_text(buffer, (int)bounds.x + 12, (int)bounds.y + 12, 24, palette->text_primary);
+    gui_draw_text(buffer,
+                  (int)bounds.x + 12,
+                  (int)(bounds.y + (bounds.height - (float)text_h) * 0.5f - 1.0f),
+                  text_size,
+                  palette->text_primary);
 
     if (active && !has_selection && ((GetTime() * 2.0) - (int)(GetTime() * 2.0) < 0.5)) {
-        int text_w = gui_measure_text(buffer, 24);
-        DrawRectangle((int)(bounds.x + 12 + (float)text_w + 1), (int)bounds.y + 10, 2, 28, palette->text_primary);
+        int text_w = gui_measure_text(buffer, text_size);
+        int cursor_h = text_h + 4;
+        int cursor_y = (int)(bounds.y + (bounds.height - (float)cursor_h) * 0.5f);
+        DrawRectangle((int)(bounds.x + 12 + (float)text_w + 1), cursor_y, 2, cursor_h, palette->text_primary);
     }
 
 }

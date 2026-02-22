@@ -367,6 +367,7 @@ void gui_screen_settings(struct ChessApp* app) {
         int theme_value_w;
         int theme_value_x;
         int text_y;
+        int text_h;
 
         snprintf(value, sizeof(value), "%d%%", app->ai_difficulty);
         if (draw_slider_row("AI Difficulty", value, difficulty_row, &ai_value, 0.0f, 100.0f)) {
@@ -382,13 +383,14 @@ void gui_screen_settings(struct ChessApp* app) {
         while (font_size > 18 && gui_measure_text(theme_name, font_size) > theme_max_w) {
             font_size--;
         }
+        text_h = gui_measure_text_height(font_size);
 
         theme_value_w = gui_measure_text(theme_name, font_size);
         theme_value_x = (int)(prev_btn.x - 14.0f - (float)theme_value_w);
         if (theme_value_x < theme_min_x) {
             theme_value_x = theme_min_x;
         }
-        text_y = (int)(theme_row.y + (theme_row.height - (float)font_size) * 0.5f - 1.0f);
+        text_y = (int)(theme_row.y + (theme_row.height - (float)text_h) * 0.5f - 1.0f);
 
         DrawRectangleRounded(theme_row, 0.10f, 8, Fade(palette->panel, 0.92f));
         DrawRectangleRoundedLinesEx(theme_row, 0.10f, 8, 1.0f, palette->panel_border);

@@ -68,7 +68,7 @@ static int draw_text_wrap(const char* text,
     }
 
     if (line_height <= 0) {
-        line_height = font_size + 6;
+        line_height = gui_measure_text_height(font_size) + 8;
     }
 
     while (*cursor != '\0' && lines < max_lines) {

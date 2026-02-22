@@ -5,6 +5,16 @@
 static Font g_ui_font;
 static bool g_ui_font_initialized = false;
 static bool g_ui_font_loaded = false;
+static int g_ui_font_base_size = 120;
+
+/* Returns spacing value tuned for serif readability at varied sizes. */
+static float text_spacing_for_size(int font_size) {
+    float spacing = (float)font_size * 0.02f;
+    if (spacing < 0.2f) {
+        spacing = 0.2f;
+    }
+    return spacing;
+}
 
 /* Tries loading one font file path and applies it if valid. */
 static bool try_load_font_path(const char* path) {
@@ -14,7 +24,7 @@ static bool try_load_font_path(const char* path) {
         return false;
     }
 
-    loaded = LoadFontEx(path, 96, NULL, 0);
+    loaded = LoadFontEx(path, g_ui_font_base_size, NULL, 0);
     if (loaded.texture.id == 0) {
         return false;
     }
@@ -61,6 +71,7 @@ bool gui_font_init(void) {
     }
 
     if (g_ui_font.texture.id != 0) {
+        GenTextureMipmaps(&g_ui_font.texture);
         SetTextureFilter(g_ui_font.texture, TEXTURE_FILTER_BILINEAR);
     }
 
@@ -82,13 +93,29 @@ void gui_font_shutdown(void) {
 }
 
 void gui_draw_text(const char* text, int pos_x, int pos_y, int font_size, Color color) {
-    float spacing = (float)font_size * 0.04f;
+    float spacing = text_spacing_for_size(font_size);
     Vector2 pos = {(float)pos_x, (float)pos_y};
-    DrawTextEx(active_font(), text, pos, (float)font_size, spacing, color);
+    Font font = active_font();
+
+    if (g_ui_font_loaded && font_size >= 18) {
+        Color under = color;
+        under.a = (unsigned char)((int)color.a * 58 / 100);
+        DrawTextEx(font, text, (Vector2){pos.x - 0.45f, pos.y}, (float)font_size, spacing, under);
+        DrawTextEx(font, text, (Vector2){pos.x + 0.45f, pos.y}, (float)font_size, spacing, under);
+    }
+
+    DrawTextEx(font, text, pos, (float)font_size, spacing, color);
 }
 
 int gui_measure_text(const char* text, int font_size) {
-    float spacing = (float)font_size * 0.04f;
+    float spacing = text_spacing_for_size(font_size);
     Vector2 size = MeasureTextEx(active_font(), text, (float)font_size, spacing);
-    return (int)lroundf(size.x);
+    float extra = (g_ui_font_loaded && font_size >= 18) ? 1.0f : 0.0f;
+    return (int)lroundf(size.x + extra);
+}
+
+int gui_measure_text_height(int font_size) {
+    float spacing = text_spacing_for_size(font_size);
+    Vector2 size = MeasureTextEx(active_font(), "Ag", (float)font_size, spacing);
+    return (int)lroundf(size.y);
 }
