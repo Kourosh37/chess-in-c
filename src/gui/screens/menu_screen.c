@@ -137,7 +137,7 @@ void gui_screen_menu(struct ChessApp* app) {
             app_start_game(app, MODE_SINGLE);
         }
 
-        if (gui_button(local_btn, "Local Multiplayer")) {
+        if (gui_button(local_btn, "Local 2 Player")) {
             if (app->online_match_active) {
                 app_online_end_match(app, true);
             }

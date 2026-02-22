@@ -385,7 +385,7 @@ void gui_screen_play(struct ChessApp* app) {
         if (app->mode == MODE_SINGLE) {
             draw_text_fit("Mode: Single Player", content_x, y, line_size, content_w, palette->text_secondary);
         } else if (app->mode == MODE_LOCAL) {
-            draw_text_fit("Mode: Local Multiplayer", content_x, y, line_size, content_w, palette->text_secondary);
+            draw_text_fit("Mode: Local 2 Player", content_x, y, line_size, content_w, palette->text_secondary);
         } else {
             draw_text_fit("Mode: Online", content_x, y, line_size, content_w, palette->text_secondary);
         }

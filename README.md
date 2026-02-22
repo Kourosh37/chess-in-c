@@ -167,7 +167,7 @@ cmake -S . -B build -G Ninja -DCHESS_FETCH_RAYLIB=OFF -DCHESS_ENABLE_WARNINGS=ON
 ### Menu
 
 - `Single Player`: human vs AI.
-- `Local Multiplayer`: two humans on one machine.
+- `Local 2 Player`: two humans on one machine.
 - `Online (P2P)`: open host/join lobby.
 - AI `Depth`: adjustable in menu, effective range `1..8`.
 - AI `Randomness`: `0..100` in steps of 10.
