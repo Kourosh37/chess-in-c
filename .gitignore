@@ -1,0 +1,56 @@
+# ------------------------------------------------------------
+# Build artifacts
+# ------------------------------------------------------------
+/build/
+/build-*/
+/cmake-build-*/
+
+# Make / GCC outputs
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dll
+*.dylib
+*.exe
+*.out
+
+# Ninja / CMake generated files
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+compile_commands.json
+build.ninja
+.ninja_deps
+.ninja_log
+CTestTestfile.cmake
+
+# FetchContent / external dependency caches
+_deps/
+
+# ------------------------------------------------------------
+# IDE/editor
+# ------------------------------------------------------------
+.vscode/
+.idea/
+*.code-workspace
+
+# Visual Studio / MSBuild
+*.sln
+*.vcxproj
+*.vcxproj.filters
+*.user
+*.pdb
+*.ilk
+*.idb
+
+# ------------------------------------------------------------
+# Runtime / local data
+# ------------------------------------------------------------
+profile.dat
+*.log
+
+# OS junk
+.DS_Store
+Thumbs.db
