@@ -47,7 +47,7 @@ bool gui_button(Rectangle bounds, const char* label) {
     Color fill = pressed ? brighten(base, -18) : base;
     Color border = brighten(base, -28);
     int font_size = (bounds.height >= 56.0f) ? 24 : 20;
-    int text_width = MeasureText(label, font_size);
+    int text_width = gui_measure_text(label, font_size);
 
     DrawRectangleRounded((Rectangle){bounds.x + 2.5f, bounds.y + 4.0f, bounds.width, bounds.height},
                          0.20f,
@@ -56,7 +56,7 @@ bool gui_button(Rectangle bounds, const char* label) {
     DrawRectangleRounded(bounds, 0.20f, 10, fill);
     DrawRectangleRoundedLinesEx(bounds, 0.20f, 10, 1.5f, border);
 
-    DrawText(label,
+    gui_draw_text(label,
              (int)(bounds.x + bounds.width * 0.5f - (float)text_width * 0.5f),
              (int)(bounds.y + bounds.height * 0.5f - (float)font_size * 0.5f),
              font_size,
@@ -97,10 +97,10 @@ void gui_input_box(Rectangle bounds, char* buffer, int capacity, bool active) {
         }
     }
 
-    DrawText(buffer, (int)bounds.x + 12, (int)bounds.y + 12, 24, palette->text_primary);
+    gui_draw_text(buffer, (int)bounds.x + 12, (int)bounds.y + 12, 24, palette->text_primary);
 
     if (active && ((GetTime() * 2.0) - (int)(GetTime() * 2.0) < 0.5)) {
-        int text_w = MeasureText(buffer, 24);
+        int text_w = gui_measure_text(buffer, 24);
         DrawRectangle((int)(bounds.x + 12 + (float)text_w + 1), (int)bounds.y + 10, 2, 28, palette->text_primary);
     }
 }

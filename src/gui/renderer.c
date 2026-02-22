@@ -571,14 +571,14 @@ static void draw_coordinates(const GuiPlayLayout* layout) {
         char text[2] = {(char)('a' + file), '\0'};
         int tx = (int)(layout->board.x + (float)file * layout->square_size + layout->square_size - (float)font_size * 0.8f);
         int ty = (int)(layout->board.y + layout->board.height + 6.0f);
-        DrawText(text, tx, ty, font_size, palette->text_secondary);
+        gui_draw_text(text, tx, ty, font_size, palette->text_secondary);
     }
 
     for (int rank = 0; rank < 8; ++rank) {
         char text[2] = {(char)('1' + rank), '\0'};
         int tx = (int)(layout->board.x - 18.0f);
         int ty = (int)(layout->board.y + (7.0f - (float)rank) * layout->square_size + 6.0f);
-        DrawText(text, tx, ty, font_size, palette->text_secondary);
+        gui_draw_text(text, tx, ty, font_size, palette->text_secondary);
     }
 }
 
@@ -588,12 +588,21 @@ static void draw_captured_group(const Position* pos, Rectangle rect, Side captur
     Side captured_side = (capturer == SIDE_WHITE) ? SIDE_BLACK : SIDE_WHITE;
     const char* title = (capturer == SIDE_WHITE) ? "White Captures" : "Black Captures";
     const PieceType order[] = {PIECE_QUEEN, PIECE_ROOK, PIECE_BISHOP, PIECE_KNIGHT, PIECE_PAWN};
-    float icon_size = 24.0f;
+    float icon_size = rect.height * 0.30f;
+    float gap;
     float x = rect.x + 14.0f;
-    float y = rect.y + 38.0f;
+    float y = rect.y + 44.0f;
+
+    if (icon_size < 28.0f) {
+        icon_size = 28.0f;
+    }
+    if (icon_size > 40.0f) {
+        icon_size = 40.0f;
+    }
+    gap = icon_size * 0.22f;
 
     draw_card(rect, palette->panel_alt, with_alpha(palette->panel_border, 0.9f));
-    DrawText(title, (int)rect.x + 12, (int)rect.y + 10, 20, palette->text_primary);
+    gui_draw_text(title, (int)rect.x + 12, (int)rect.y + 10, 22, palette->text_primary);
 
     for (int i = 0; i < (int)(sizeof(order) / sizeof(order[0])); ++i) {
         PieceType piece = order[i];
@@ -602,9 +611,9 @@ static void draw_captured_group(const Position* pos, Rectangle rect, Side captur
         int captured = total - current;
 
         for (int n = 0; n < captured; ++n) {
-            if (x + icon_size > rect.x + rect.width - 12.0f) {
+            if (x + icon_size > rect.x + rect.width - 14.0f) {
                 x = rect.x + 14.0f;
-                y += icon_size + 8.0f;
+                y += icon_size + gap;
             }
 
             draw_piece_shape(piece,
@@ -612,7 +621,7 @@ static void draw_captured_group(const Position* pos, Rectangle rect, Side captur
                              (Vector2){x + icon_size * 0.5f, y + icon_size * 0.5f},
                              icon_size,
                              0.95f);
-            x += icon_size + 8.0f;
+            x += icon_size + gap;
         }
     }
 }
@@ -801,7 +810,7 @@ void gui_draw_board(const ChessApp* app) {
     }
 
     {
-        float capture_height = layout.sidebar.height * 0.26f;
+        float capture_height = layout.sidebar.height * 0.29f;
         Rectangle top = {
             layout.sidebar.x + 12.0f,
             layout.sidebar.y + 70.0f,

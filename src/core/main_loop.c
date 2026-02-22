@@ -224,9 +224,10 @@ int run_main_loop(void) {
     ai_worker_init(&worker);
 
     SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT);
-    InitWindow(1280, 820, "ChessProject - C Chess Engine");
+    InitWindow(1280, 820, "Chess");
     SetWindowMinSize(980, 680);
     SetTargetFPS(60);
+    gui_font_init();
     audio_init();
     audio_set_enabled(app.sound_enabled);
     audio_set_master_volume(app.sound_volume);
@@ -259,8 +260,10 @@ int run_main_loop(void) {
 
     ai_worker_shutdown(&worker);
     profile_save(&app.profile, "profile.dat");
+    app_save_settings(&app);
     network_client_shutdown(&app.network);
     audio_shutdown();
+    gui_font_shutdown();
 
     CloseWindow();
     return 0;

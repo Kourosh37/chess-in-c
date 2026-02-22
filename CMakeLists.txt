@@ -46,6 +46,7 @@ set(CHESS_SOURCES
     src/engine/bitboard.c
     src/engine/movegen.c
     src/engine/search.c
+    src/gui/font.c
     src/gui/renderer.c
     src/gui/ui_widgets.c
     src/gui/screens/menu_screen.c

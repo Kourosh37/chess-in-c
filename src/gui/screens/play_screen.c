@@ -48,6 +48,84 @@ static bool find_selected_move(const ChessApp* app, int from, int to, uint8_t pr
     return false;
 }
 
+/* Draws scrollable move history panel and handles mouse-wheel scrolling. */
+static void draw_move_log_panel(ChessApp* app, Rectangle panel) {
+    const GuiPalette* palette = gui_palette();
+    Rectangle content = {panel.x + 10.0f, panel.y + 38.0f, panel.width - 20.0f, panel.height - 48.0f};
+    float wheel = 0.0f;
+    int line_h = 22;
+    int visible;
+    int max_start;
+    int start;
+    int y;
+
+    DrawRectangleRounded(panel, 0.08f, 8, Fade(palette->panel, 0.92f));
+    DrawRectangleRoundedLinesEx(panel, 0.08f, 8, 1.0f, palette->panel_border);
+    gui_draw_text("Moves", (int)panel.x + 12, (int)panel.y + 10, 22, palette->text_primary);
+
+    visible = (int)(content.height / (float)line_h);
+    if (visible < 1) {
+        visible = 1;
+    }
+
+    max_start = app->move_log_count - visible;
+    if (max_start < 0) {
+        max_start = 0;
+    }
+
+    if (CheckCollisionPointRec(GetMousePosition(), panel)) {
+        wheel = GetMouseWheelMove();
+        if (wheel != 0.0f) {
+            app->move_log_scroll -= (int)(wheel * 2.0f);
+        }
+    }
+
+    if (app->move_log_scroll < 0) {
+        app->move_log_scroll = 0;
+    }
+    if (app->move_log_scroll > max_start) {
+        app->move_log_scroll = max_start;
+    }
+
+    start = app->move_log_scroll;
+    y = (int)content.y;
+
+    if (app->move_log_count == 0) {
+        gui_draw_text("No moves yet.", (int)content.x, y + 6, 19, palette->text_secondary);
+    } else {
+        for (int i = 0; i < visible; ++i) {
+            int index = start + i;
+            if (index >= app->move_log_count) {
+                break;
+            }
+            gui_draw_text(app->move_log[index], (int)content.x, y + i * line_h, 19, palette->text_primary);
+        }
+    }
+
+    if (app->move_log_count > visible) {
+        float track_h = content.height;
+        float ratio = (float)visible / (float)app->move_log_count;
+        float thumb_h = track_h * ratio;
+        float t;
+        float thumb_y;
+        Rectangle track;
+        Rectangle thumb;
+
+        if (thumb_h < 22.0f) {
+            thumb_h = 22.0f;
+        }
+
+        t = (max_start > 0) ? ((float)start / (float)max_start) : 0.0f;
+        thumb_y = content.y + (track_h - thumb_h) * t;
+
+        track = (Rectangle){panel.x + panel.width - 10.0f, content.y, 4.0f, track_h};
+        thumb = (Rectangle){panel.x + panel.width - 11.0f, thumb_y, 6.0f, thumb_h};
+
+        DrawRectangleRounded(track, 0.4f, 6, Fade(palette->panel_border, 0.55f));
+        DrawRectangleRounded(thumb, 0.4f, 6, palette->accent);
+    }
+}
+
 /* Draws a blocking confirmation dialog when user attempts to leave a running game. */
 static void draw_leave_confirm_dialog(ChessApp* app) {
     const GuiPalette* palette = gui_palette();
@@ -78,21 +156,21 @@ static void draw_leave_confirm_dialog(ChessApp* app) {
     DrawRectangleRounded(panel, 0.08f, 8, Fade(palette->panel, 0.98f));
     DrawRectangleRoundedLinesEx(panel, 0.08f, 8, 1.4f, palette->panel_border);
 
-    DrawText("Leave Current Game?", (int)panel.x + 20, (int)panel.y + 20, 34, palette->text_primary);
+    gui_draw_text("Leave Current Game?", (int)panel.x + 20, (int)panel.y + 20, 34, palette->text_primary);
 
     if (app->mode == MODE_ONLINE && app->online_match_active) {
-        DrawText("Menu: game stays active in background and can be resumed from lobby/menu.",
+        gui_draw_text("Menu: game stays active in background and can be resumed from lobby/menu.",
                  (int)panel.x + 20,
                  (int)panel.y + 74,
                  20,
                  palette->text_secondary);
-        DrawText("Leave Match: notifies opponent and closes this online session.",
+        gui_draw_text("Leave Match: notifies opponent and closes this online session.",
                  (int)panel.x + 20,
                  (int)panel.y + 102,
                  20,
                  palette->text_secondary);
     } else {
-        DrawText("If you leave now, this match state will be closed.",
+        gui_draw_text("If you leave now, this match state will be closed.",
                  (int)panel.x + 20,
                  (int)panel.y + 84,
                  22,
@@ -172,38 +250,38 @@ void gui_screen_play(struct ChessApp* app) {
         char line[128];
 
         snprintf(line, sizeof(line), "Turn: %s", side_to_text(app->position.side_to_move));
-        DrawText(line, (int)middle.x + 12, y, 24, palette->text_primary);
+        gui_draw_text(line, (int)middle.x + 12, y, 24, palette->text_primary);
         y += 34;
 
         if (app->mode == MODE_SINGLE) {
-            DrawText("Mode: Single Player", (int)middle.x + 12, y, 21, palette->text_secondary);
+            gui_draw_text("Mode: Single Player", (int)middle.x + 12, y, 21, palette->text_secondary);
         } else if (app->mode == MODE_LOCAL) {
-            DrawText("Mode: Local Multiplayer", (int)middle.x + 12, y, 21, palette->text_secondary);
+            gui_draw_text("Mode: Local Multiplayer", (int)middle.x + 12, y, 21, palette->text_secondary);
         } else {
-            DrawText("Mode: Online P2P", (int)middle.x + 12, y, 21, palette->text_secondary);
+            gui_draw_text("Mode: Online", (int)middle.x + 12, y, 21, palette->text_secondary);
         }
         y += 32;
 
         if (app->mode == MODE_ONLINE) {
-            DrawText(app->online_runtime_status, (int)middle.x + 12, y, 20, palette->text_secondary);
+            gui_draw_text(app->online_runtime_status, (int)middle.x + 12, y, 20, palette->text_secondary);
             y += 30;
         } else if (app->mode == MODE_SINGLE) {
             char ai_line[96];
             snprintf(ai_line, sizeof(ai_line), "AI: depth %d  randomness %d",
                      app->ai_limits.depth,
                      app->ai_limits.randomness);
-            DrawText(ai_line, (int)middle.x + 12, y, 20, palette->text_secondary);
+            gui_draw_text(ai_line, (int)middle.x + 12, y, 20, palette->text_secondary);
             y += 30;
         }
 
         if (app->mode == MODE_SINGLE && app->ai_thinking) {
-            DrawText("AI is thinking...", (int)middle.x + 12, y, 22, palette->accent);
+            gui_draw_text("AI is thinking...", (int)middle.x + 12, y, 22, palette->accent);
             y += 32;
         } else if (app->mode == MODE_ONLINE && app->online_match_active && app->network.connected && !app_is_human_turn(app)) {
-            DrawText("Waiting for opponent...", (int)middle.x + 12, y, 22, palette->accent);
+            gui_draw_text("Waiting for opponent...", (int)middle.x + 12, y, 22, palette->accent);
             y += 32;
         } else if (app->mode == MODE_ONLINE && !app->network.connected) {
-            DrawText("Opponent disconnected.", (int)middle.x + 12, y, 22, (Color){176, 78, 29, 255});
+            gui_draw_text("Opponent disconnected.", (int)middle.x + 12, y, 22, (Color){176, 78, 29, 255});
             y += 32;
         }
 
@@ -215,7 +293,7 @@ void gui_screen_play(struct ChessApp* app) {
                      app->last_ai_result.depth_reached,
                      app->last_ai_result.score,
                      (unsigned long long)app->last_ai_result.nodes);
-            DrawText(info, (int)middle.x + 12, y, 18, palette->text_secondary);
+            gui_draw_text(info, (int)middle.x + 12, y, 18, palette->text_secondary);
             y += 28;
         }
 
@@ -226,11 +304,21 @@ void gui_screen_play(struct ChessApp* app) {
             if (mate) {
                 Side winner = (loser == SIDE_WHITE) ? SIDE_BLACK : SIDE_WHITE;
                 snprintf(line, sizeof(line), "Checkmate! %s wins.", side_to_text(winner));
-                DrawText(line, (int)middle.x + 12, y + 6, 25, (Color){184, 36, 42, 255});
+                gui_draw_text(line, (int)middle.x + 12, y + 6, 25, (Color){184, 36, 42, 255});
             } else {
-                DrawText("Draw (stalemate).", (int)middle.x + 12, y + 6, 25, palette->text_primary);
+                gui_draw_text("Draw (stalemate).", (int)middle.x + 12, y + 6, 25, palette->text_primary);
             }
         }
+    }
+
+    {
+        Rectangle log_panel = {
+            middle.x + 10.0f,
+            middle.y + middle.height * 0.44f,
+            middle.width - 20.0f,
+            middle.height * 0.53f
+        };
+        draw_move_log_panel(app, log_panel);
     }
 
     if (app->leave_confirm_open) {

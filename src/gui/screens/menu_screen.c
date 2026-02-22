@@ -47,8 +47,7 @@ void gui_screen_menu(struct ChessApp* app) {
     DrawRectangleRounded(panel, 0.08f, 8, Fade(palette->panel, 0.94f));
     DrawRectangleRoundedLinesEx(panel, 0.08f, 8, 1.5f, palette->panel_border);
 
-    DrawText("ChessProject", (int)panel.x + 40, (int)panel.y + 34, 56, palette->text_primary);
-    DrawText("C11 Engine + Raylib UI + Direct P2P", (int)panel.x + 42, (int)panel.y + 98, 24, palette->text_secondary);
+    gui_draw_text("Chess", (int)panel.x + 40, (int)panel.y + 38, 58, palette->text_primary);
 
     snprintf(profile_line,
              sizeof(profile_line),
@@ -56,13 +55,13 @@ void gui_screen_menu(struct ChessApp* app) {
              app->profile.username,
              app->profile.wins,
              app->profile.losses);
-    DrawText(profile_line, (int)panel.x + 42, (int)panel.y + 145, 22, palette->text_primary);
+    gui_draw_text(profile_line, (int)panel.x + 42, (int)panel.y + 126, 22, palette->text_primary);
 
-    single_btn = (Rectangle){panel.x + 42.0f, panel.y + 205.0f, panel.width - 84.0f, 58.0f};
-    local_btn = (Rectangle){panel.x + 42.0f, panel.y + 276.0f, panel.width - 84.0f, 58.0f};
-    online_btn = (Rectangle){panel.x + 42.0f, panel.y + 347.0f, panel.width - 84.0f, 58.0f};
-    resume_btn = (Rectangle){panel.x + 42.0f, panel.y + 418.0f, panel.width - 84.0f, 58.0f};
-    settings_btn = (Rectangle){panel.x + 42.0f, panel.y + (has_resume ? 489.0f : 430.0f), panel.width - 84.0f, 58.0f};
+    single_btn = (Rectangle){panel.x + 42.0f, panel.y + 184.0f, panel.width - 84.0f, 58.0f};
+    local_btn = (Rectangle){panel.x + 42.0f, panel.y + 255.0f, panel.width - 84.0f, 58.0f};
+    online_btn = (Rectangle){panel.x + 42.0f, panel.y + 326.0f, panel.width - 84.0f, 58.0f};
+    resume_btn = (Rectangle){panel.x + 42.0f, panel.y + 397.0f, panel.width - 84.0f, 58.0f};
+    settings_btn = (Rectangle){panel.x + 42.0f, panel.y + (has_resume ? 468.0f : 397.0f), panel.width - 84.0f, 58.0f};
 
     if (gui_button(single_btn, "Single Player")) {
         if (app->online_match_active) {
@@ -79,7 +78,7 @@ void gui_screen_menu(struct ChessApp* app) {
         app_start_game(app, MODE_LOCAL);
     }
 
-    if (gui_button(online_btn, "Online Lobby (P2P)")) {
+    if (gui_button(online_btn, "Online")) {
         app->mode = MODE_ONLINE;
         app->screen = SCREEN_LOBBY;
         app->lobby_input[0] = '\0';
@@ -96,16 +95,10 @@ void gui_screen_menu(struct ChessApp* app) {
     }
 
     if (has_resume) {
-        DrawText(app->online_runtime_status,
+        gui_draw_text(app->online_runtime_status,
                  (int)panel.x + 42,
-                 (int)panel.y + panel.height - 74,
+                 (int)panel.y + panel.height - 48,
                  18,
                  palette->text_secondary);
     }
-
-    DrawText("Tip: Settings page contains AI depth, randomness, theme, and audio controls.",
-             (int)panel.x + 42,
-             (int)panel.y + panel.height - 44,
-             19,
-             palette->text_secondary);
 }

@@ -13,6 +13,7 @@
 /* Board and protocol limits. */
 #define BOARD_SQUARES 64
 #define MAX_MOVES 256
+#define MOVE_LOG_MAX 512
 #define INVITE_CODE_LEN 10
 #define PLAYER_NAME_MAX 31
 

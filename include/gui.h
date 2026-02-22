@@ -47,6 +47,10 @@ extern "C" {
 /* Generic widgets. */
 bool gui_button(Rectangle bounds, const char* label);
 void gui_input_box(Rectangle bounds, char* buffer, int capacity, bool active);
+bool gui_font_init(void);
+void gui_font_shutdown(void);
+void gui_draw_text(const char* text, int pos_x, int pos_y, int font_size, Color color);
+int gui_measure_text(const char* text, int font_size);
 
 /* Board rendering and coordinate conversion helpers. */
 void gui_draw_board(const struct ChessApp* app);

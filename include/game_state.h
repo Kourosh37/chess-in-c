@@ -56,6 +56,10 @@ typedef struct ChessApp {
     float move_anim_duration;
 
     bool leave_confirm_open;
+
+    char move_log[MOVE_LOG_MAX][64];
+    int move_log_count;
+    int move_log_scroll;
 } ChessApp;
 
 /* App lifecycle and game flow helpers. */
@@ -68,5 +72,6 @@ bool app_apply_move(ChessApp* app, Move move);
 bool app_is_human_turn(const ChessApp* app);
 void app_tick(ChessApp* app, float delta_time);
 void app_online_end_match(ChessApp* app, bool notify_peer);
+bool app_save_settings(const ChessApp* app);
 
 #endif

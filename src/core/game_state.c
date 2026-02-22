@@ -9,6 +9,104 @@
 
 /* Default local profile persistence file. */
 static const char* PROFILE_PATH = "profile.dat";
+static const char* SETTINGS_PATH = "settings.dat";
+
+/* Converts board square index to algebraic coordinate (e.g. e4). */
+static void square_to_text(int square, char out[3]) {
+    out[0] = (char)('a' + (square & 7));
+    out[1] = (char)('1' + (square >> 3));
+    out[2] = '\0';
+}
+
+/* Appends one human-readable move entry into scrollable move log. */
+static void append_move_log(ChessApp* app, Side side, Move move) {
+    char from[3];
+    char to[3];
+    char line[64];
+    const char* side_name = (side == SIDE_WHITE) ? "White" : "Black";
+
+    square_to_text(move.from, from);
+    square_to_text(move.to, to);
+
+    if ((move.flags & MOVE_FLAG_PROMOTION) != 0U) {
+        char promo = 'Q';
+        if (move.promotion == PIECE_ROOK) {
+            promo = 'R';
+        } else if (move.promotion == PIECE_BISHOP) {
+            promo = 'B';
+        } else if (move.promotion == PIECE_KNIGHT) {
+            promo = 'N';
+        }
+        snprintf(line, sizeof(line), "%s: %s -> %s=%c", side_name, from, to, promo);
+    } else {
+        snprintf(line, sizeof(line), "%s: %s -> %s", side_name, from, to);
+    }
+
+    if (app->move_log_count >= MOVE_LOG_MAX) {
+        memmove(app->move_log[0], app->move_log[1], (MOVE_LOG_MAX - 1) * sizeof(app->move_log[0]));
+        app->move_log_count = MOVE_LOG_MAX - 1;
+    }
+
+    strncpy(app->move_log[app->move_log_count], line, sizeof(app->move_log[0]) - 1);
+    app->move_log[app->move_log_count][sizeof(app->move_log[0]) - 1] = '\0';
+    app->move_log_count++;
+    app->move_log_scroll = app->move_log_count;
+}
+
+/* Parses persisted settings key/value pairs into app state. */
+static void load_settings(ChessApp* app) {
+    FILE* file = fopen(SETTINGS_PATH, "r");
+    char line[128];
+
+    if (file == NULL) {
+        return;
+    }
+
+    while (fgets(line, sizeof(line), file) != NULL) {
+        if (strncmp(line, "theme=", 6) == 0) {
+            int value = atoi(line + 6);
+            if (value < THEME_CLASSIC) {
+                value = THEME_CLASSIC;
+            }
+            if (value > THEME_OCEAN) {
+                value = THEME_OCEAN;
+            }
+            app->theme = (ColorTheme)value;
+        } else if (strncmp(line, "ai_depth=", 9) == 0) {
+            int depth = atoi(line + 9);
+            if (depth < 1) {
+                depth = 1;
+            }
+            if (depth > 8) {
+                depth = 8;
+            }
+            app->ai_limits.depth = depth;
+        } else if (strncmp(line, "ai_randomness=", 14) == 0) {
+            int randomness = atoi(line + 14);
+            if (randomness < 0) {
+                randomness = 0;
+            }
+            if (randomness > 100) {
+                randomness = 100;
+            }
+            app->ai_limits.randomness = (randomness / 10) * 10;
+        } else if (strncmp(line, "sound_enabled=", 14) == 0) {
+            int enabled = atoi(line + 14);
+            app->sound_enabled = (enabled != 0);
+        } else if (strncmp(line, "sound_volume=", 13) == 0) {
+            float volume = (float)atof(line + 13);
+            if (volume < 0.0f) {
+                volume = 0.0f;
+            }
+            if (volume > 1.0f) {
+                volume = 1.0f;
+            }
+            app->sound_volume = volume;
+        }
+    }
+
+    fclose(file);
+}
 
 /* Initializes a profile object with safe defaults. */
 static void set_default_profile(Profile* profile) {
@@ -43,6 +141,8 @@ void app_init(ChessApp* app) {
     app->sound_enabled = true;
     app->sound_volume = 1.0f;
 
+    load_settings(app);
+
     set_default_profile(&app->profile);
     if (!profile_load(&app->profile, PROFILE_PATH)) {
         profile_save(&app->profile, PROFILE_PATH);
@@ -58,6 +158,8 @@ void app_init(ChessApp* app) {
 
     app->lobby_input[0] = '\0';
     app->lobby_code[0] = '\0';
+    app->move_log_count = 0;
+    app->move_log_scroll = 0;
     app->online_match_code[0] = '\0';
     app->online_match_active = false;
     app->leave_confirm_open = false;
@@ -66,9 +168,9 @@ void app_init(ChessApp* app) {
              "No active online match.");
 
     if (network_client_init(&app->network, 0)) {
-        snprintf(app->lobby_status, sizeof(app->lobby_status), "Direct P2P mode: no central server.");
+        snprintf(app->lobby_status, sizeof(app->lobby_status), "Online is ready.");
     } else {
-        snprintf(app->lobby_status, sizeof(app->lobby_status), "Network init failed. Online mode unavailable.");
+        snprintf(app->lobby_status, sizeof(app->lobby_status), "Network unavailable.");
     }
 }
 
@@ -85,6 +187,8 @@ void app_start_game(ChessApp* app, GameMode mode) {
     app->last_move_from = -1;
     app->last_move_to = -1;
     app->leave_confirm_open = false;
+    app->move_log_count = 0;
+    app->move_log_scroll = 0;
 
     if (mode == MODE_ONLINE) {
         app->online_match_active = true;
@@ -152,6 +256,8 @@ bool app_apply_move(ChessApp* app, Move move) {
     }
 
     audio_play(move_sfx);
+
+    append_move_log(app, moving_side, move);
 
     app->has_selection = false;
     app->selected_square = -1;
@@ -222,4 +328,27 @@ void app_online_end_match(ChessApp* app, bool notify_peer) {
     snprintf(app->online_runtime_status,
              sizeof(app->online_runtime_status),
              "Online match closed.");
+}
+
+/* Persists selected UI/audio/gameplay settings to local settings file. */
+bool app_save_settings(const ChessApp* app) {
+    FILE* file;
+
+    if (app == NULL) {
+        return false;
+    }
+
+    file = fopen(SETTINGS_PATH, "w");
+    if (file == NULL) {
+        return false;
+    }
+
+    fprintf(file, "theme=%d\n", (int)app->theme);
+    fprintf(file, "ai_depth=%d\n", app->ai_limits.depth);
+    fprintf(file, "ai_randomness=%d\n", app->ai_limits.randomness);
+    fprintf(file, "sound_enabled=%d\n", app->sound_enabled ? 1 : 0);
+    fprintf(file, "sound_volume=%.3f\n", app->sound_volume);
+
+    fclose(file);
+    return true;
 }
