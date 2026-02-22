@@ -50,8 +50,10 @@ _deps/
 # Runtime / local data
 # ------------------------------------------------------------
 profile.dat
+settings.dat
 *.log
 
 # OS junk
 .DS_Store
 Thumbs.db
+

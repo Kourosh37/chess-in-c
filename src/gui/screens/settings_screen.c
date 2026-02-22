@@ -320,6 +320,57 @@ void gui_screen_settings(struct ChessApp* app) {
                           19,
                           status_w,
                           palette->text_secondary);
+            status_y += 23.0f;
+        }
+
+        {
+            int missing_sfx[AUDIO_SFX_COUNT];
+            int missing_count = 0;
+            float bottom_y = right_card.y + right_card.height - 14.0f;
+            int line_h = 21;
+            int drawn = 0;
+
+            for (int i = 0; i < AUDIO_SFX_COUNT; ++i) {
+                if (!audio_is_loaded((AudioSfx)i)) {
+                    missing_sfx[missing_count++] = i;
+                }
+            }
+
+            if (missing_count > 0 && status_y + 18.0f < bottom_y) {
+                draw_text_fit("Missing SFX files:",
+                              (int)right_card.x + 18,
+                              (int)status_y,
+                              19,
+                              status_w,
+                              palette->text_secondary);
+                status_y += 23.0f;
+            }
+
+            while (drawn < missing_count && status_y + (float)line_h <= bottom_y) {
+                int remaining_after_this = missing_count - (drawn + 1);
+                int lines_left = (int)((bottom_y - status_y) / (float)line_h);
+
+                if (lines_left <= 1 && remaining_after_this > 0) {
+                    char more_line[32];
+                    snprintf(more_line, sizeof(more_line), "+%d more...", remaining_after_this + 1);
+                    draw_text_fit(more_line,
+                                  (int)right_card.x + 26,
+                                  (int)status_y,
+                                  18,
+                                  status_w - 8,
+                                  palette->text_secondary);
+                    break;
+                }
+
+                draw_text_fit(audio_expected_filename((AudioSfx)missing_sfx[drawn]),
+                              (int)right_card.x + 26,
+                              (int)status_y,
+                              18,
+                              status_w - 8,
+                              palette->text_secondary);
+                status_y += (float)line_h;
+                drawn++;
+            }
         }
     }
 
