@@ -125,7 +125,7 @@ static void maybe_process_network(ChessApp* app) {
             if (app->network.connected && app->network.is_host) {
                 audio_play(AUDIO_SFX_LOBBY_JOIN);
                 app->mode = MODE_ONLINE;
-                app->human_side = SIDE_WHITE;
+                app->human_side = app->network.host_side;
                 app->lobby_view = LOBBY_VIEW_HOST;
                 app->online_local_ready = false;
                 app->online_peer_ready = false;
@@ -156,9 +156,10 @@ static void maybe_process_network(ChessApp* app) {
 
         if (packet.type == NET_MSG_JOIN_ACCEPT) {
             if (app->network.connected && !app->network.is_host) {
+                Side assigned = (packet.flags == SIDE_BLACK) ? SIDE_BLACK : SIDE_WHITE;
                 audio_play(AUDIO_SFX_LOBBY_JOIN);
                 app->mode = MODE_ONLINE;
-                app->human_side = SIDE_BLACK;
+                app->human_side = assigned;
                 app->lobby_view = LOBBY_VIEW_JOIN;
                 app->online_local_ready = false;
                 app->online_peer_ready = false;

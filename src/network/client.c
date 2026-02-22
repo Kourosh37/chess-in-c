@@ -1,5 +1,6 @@
 #include "network.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 #ifdef _WIN32
@@ -252,6 +253,7 @@ bool network_client_host(NetworkClient* client, const char* username, char out_c
     strncpy(client->invite_code, out_code, INVITE_CODE_LEN);
     client->invite_code[INVITE_CODE_LEN] = '\0';
 
+    client->host_side = (rand() & 1) ? SIDE_WHITE : SIDE_BLACK;
     client->is_host = true;
     client->connected = false;
     client->peer_addr_len = 0;
@@ -391,6 +393,7 @@ bool network_client_poll(NetworkClient* client, NetPacket* out_packet) {
             memset(&ack, 0, sizeof(ack));
             ack.type = NET_MSG_JOIN_ACCEPT;
             ack.sequence = ++client->sequence;
+            ack.flags = (client->host_side == SIDE_WHITE) ? SIDE_BLACK : SIDE_WHITE;
             strncpy(ack.invite_code, client->invite_code, INVITE_CODE_LEN);
             send_packet(client, &ack, (const struct sockaddr*)&from, (int)from_len);
         } else {

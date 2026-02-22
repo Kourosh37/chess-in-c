@@ -25,6 +25,7 @@ typedef struct NetworkClient {
     bool initialized;
     bool connected;
     bool is_host;
+    Side host_side;
     char invite_code[INVITE_CODE_LEN + 1];
 } NetworkClient;
 

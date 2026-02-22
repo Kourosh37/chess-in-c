@@ -56,6 +56,7 @@ int gui_measure_text(const char* text, int font_size);
 void gui_draw_board(const struct ChessApp* app);
 int gui_square_from_mouse(Vector2 mouse);
 GuiPlayLayout gui_get_play_layout(void);
+bool gui_board_is_rotating(void);
 
 /* Theme and style accessors. */
 int gui_theme_count(void);

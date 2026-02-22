@@ -98,6 +98,13 @@ static const char* g_piece_texture_paths[2][6] = {
 static Texture2D g_piece_textures[2][6];
 static bool g_piece_texture_ready[2][6];
 static bool g_piece_texture_init_attempted = false;
+static RenderTexture2D g_board_surface;
+static bool g_board_surface_ready = false;
+static int g_board_surface_size = 0;
+static bool g_view_initialized = false;
+static bool g_board_rotating = false;
+static Side g_board_input_side = SIDE_WHITE;
+static float g_board_rotation_deg = 0.0f;
 
 /* Clamps index into available palette range. */
 static int clamp_theme_index(int index) {
@@ -272,6 +279,174 @@ static Vector2 square_center(const GuiPlayLayout* layout, int square) {
         rect.x + rect.width * 0.5f,
         rect.y + rect.height * 0.5f
     };
+}
+
+/* Returns board-view target side based on mode and local player color. */
+static Side board_target_side(const ChessApp* app) {
+    if (app->mode == MODE_LOCAL) {
+        return app->position.side_to_move;
+    }
+    if (app->mode == MODE_ONLINE) {
+        return app->human_side;
+    }
+    return SIDE_WHITE;
+}
+
+/* Eases board rotation angle toward target side for smooth flips. */
+static void update_board_rotation(const ChessApp* app) {
+    float dt = GetFrameTime();
+    Side target_side = board_target_side(app);
+    float target_deg = (target_side == SIDE_WHITE) ? 0.0f : 180.0f;
+    float speed = 900.0f;
+    float diff;
+    float step;
+
+    if (!g_view_initialized) {
+        g_view_initialized = true;
+        g_board_rotation_deg = target_deg;
+        g_board_input_side = target_side;
+        g_board_rotating = false;
+        return;
+    }
+
+    diff = target_deg - g_board_rotation_deg;
+    while (diff > 180.0f) {
+        diff -= 360.0f;
+    }
+    while (diff < -180.0f) {
+        diff += 360.0f;
+    }
+
+    step = speed * dt;
+    if (step < 0.5f) {
+        step = 0.5f;
+    }
+
+    if (fabsf(diff) <= 1.0f) {
+        g_board_rotation_deg = target_deg;
+        g_board_input_side = target_side;
+        g_board_rotating = false;
+    } else {
+        if (diff > step) {
+            diff = step;
+        } else if (diff < -step) {
+            diff = -step;
+        }
+
+        g_board_rotation_deg += diff;
+        while (g_board_rotation_deg >= 360.0f) {
+            g_board_rotation_deg -= 360.0f;
+        }
+        while (g_board_rotation_deg < 0.0f) {
+            g_board_rotation_deg += 360.0f;
+        }
+
+        g_board_rotating = true;
+    }
+}
+
+/* Allocates or resizes board render surface to match current board pixel size. */
+static bool ensure_board_surface(int size) {
+    if (size <= 0) {
+        return false;
+    }
+
+    if (g_board_surface_ready && g_board_surface_size != size) {
+        UnloadRenderTexture(g_board_surface);
+        memset(&g_board_surface, 0, sizeof(g_board_surface));
+        g_board_surface_ready = false;
+        g_board_surface_size = 0;
+    }
+
+    if (!g_board_surface_ready) {
+        g_board_surface = LoadRenderTexture(size, size);
+        if (g_board_surface.texture.id == 0) {
+            memset(&g_board_surface, 0, sizeof(g_board_surface));
+            return false;
+        }
+        SetTextureFilter(g_board_surface.texture, TEXTURE_FILTER_BILINEAR);
+        g_board_surface_ready = true;
+        g_board_surface_size = size;
+    }
+
+    return true;
+}
+
+/* Finds one attacker square delivering check to given king square, if any. */
+static bool find_check_attacker_square(const Position* pos, Side checked_side, int king_square, int* out_square) {
+    Side attacker_side = (checked_side == SIDE_WHITE) ? SIDE_BLACK : SIDE_WHITE;
+    Bitboard king_bb;
+
+    if (king_square < 0 || king_square >= BOARD_SQUARES || out_square == NULL) {
+        return false;
+    }
+
+    king_bb = 1ULL << king_square;
+
+    for (int square = 0; square < BOARD_SQUARES; ++square) {
+        Bitboard bb = 1ULL << square;
+
+        if ((pos->pieces[attacker_side][PIECE_PAWN] & bb) != 0ULL &&
+            (engine_get_pawn_attacks(attacker_side, square) & king_bb) != 0ULL) {
+            *out_square = square;
+            return true;
+        }
+    }
+
+    for (int square = 0; square < BOARD_SQUARES; ++square) {
+        Bitboard bb = 1ULL << square;
+
+        if ((pos->pieces[attacker_side][PIECE_KNIGHT] & bb) != 0ULL &&
+            (engine_get_knight_attacks(square) & king_bb) != 0ULL) {
+            *out_square = square;
+            return true;
+        }
+    }
+
+    for (int square = 0; square < BOARD_SQUARES; ++square) {
+        Bitboard bb = 1ULL << square;
+
+        if ((pos->pieces[attacker_side][PIECE_BISHOP] & bb) != 0ULL &&
+            (engine_get_bishop_attacks(square, pos->all_occupied) & king_bb) != 0ULL) {
+            *out_square = square;
+            return true;
+        }
+    }
+
+    for (int square = 0; square < BOARD_SQUARES; ++square) {
+        Bitboard bb = 1ULL << square;
+
+        if ((pos->pieces[attacker_side][PIECE_ROOK] & bb) != 0ULL &&
+            (engine_get_rook_attacks(square, pos->all_occupied) & king_bb) != 0ULL) {
+            *out_square = square;
+            return true;
+        }
+    }
+
+    for (int square = 0; square < BOARD_SQUARES; ++square) {
+        Bitboard bb = 1ULL << square;
+
+        if ((pos->pieces[attacker_side][PIECE_QUEEN] & bb) != 0ULL) {
+            Bitboard queen_attacks = engine_get_bishop_attacks(square, pos->all_occupied) |
+                                     engine_get_rook_attacks(square, pos->all_occupied);
+            if ((queen_attacks & king_bb) != 0ULL) {
+                *out_square = square;
+                return true;
+            }
+        }
+    }
+
+    for (int square = 0; square < BOARD_SQUARES; ++square) {
+        Bitboard bb = 1ULL << square;
+
+        if ((pos->pieces[attacker_side][PIECE_KING] & bb) != 0ULL &&
+            (engine_get_king_attacks(square) & king_bb) != 0ULL) {
+            *out_square = square;
+            return true;
+        }
+    }
+
+    return false;
 }
 
 /* Returns true when square is a legal destination for current selection. */
@@ -798,28 +973,63 @@ int gui_square_from_mouse(Vector2 mouse) {
         return -1;
     }
 
-    rank = 7 - rank_from_top;
+    if (g_board_input_side == SIDE_BLACK) {
+        file = 7 - file;
+        rank = rank_from_top;
+    } else {
+        rank = 7 - rank_from_top;
+    }
     return (rank << 3) | file;
+}
+
+bool gui_board_is_rotating(void) {
+    return g_board_rotating;
 }
 
 void gui_draw_board(const ChessApp* app) {
     const GuiPalette* palette = gui_palette();
     GuiPlayLayout layout = gui_get_play_layout();
+    GuiPlayLayout board_surface_layout;
     Rectangle info_card = {
         layout.sidebar.x,
         layout.sidebar.y,
         layout.sidebar.width,
         layout.sidebar.height
     };
+    int board_px = (int)layout.board.width;
+    bool in_check;
+    int checked_king_square = -1;
+    int check_attacker_square = -1;
     float piece_size = layout.square_size * 0.88f;
 
+    update_board_rotation(app);
     draw_card(info_card, with_alpha(palette->panel, 0.92f), palette->panel_border);
     draw_coordinate_frame(&layout);
+
+    if (!ensure_board_surface(board_px)) {
+        return;
+    }
+
+    board_surface_layout = layout;
+    board_surface_layout.board.x = 0.0f;
+    board_surface_layout.board.y = 0.0f;
+
+    in_check = engine_in_check(&app->position, app->position.side_to_move);
+    if (in_check) {
+        checked_king_square = engine_find_king_square(&app->position, app->position.side_to_move);
+        find_check_attacker_square(&app->position,
+                                   app->position.side_to_move,
+                                   checked_king_square,
+                                   &check_attacker_square);
+    }
+
+    BeginTextureMode(g_board_surface);
+    ClearBackground(BLANK);
 
     for (int rank = 7; rank >= 0; --rank) {
         for (int file = 0; file < 8; ++file) {
             int square = (rank << 3) | file;
-            Rectangle rect = square_rect(&layout, square);
+            Rectangle rect = square_rect(&board_surface_layout, square);
             bool light = ((rank + file) & 1) == 0;
             Color sq_color = light ? palette->board_light : palette->board_dark;
 
@@ -839,9 +1049,6 @@ void gui_draw_board(const ChessApp* app) {
         }
     }
 
-    DrawRectangleRoundedLinesEx(layout.board, 0.02f, 8, 2.0f, palette->board_outline);
-    draw_coordinates(&layout);
-
     for (int square = 0; square < BOARD_SQUARES; ++square) {
         Side side;
         PieceType piece;
@@ -855,13 +1062,13 @@ void gui_draw_board(const ChessApp* app) {
             continue;
         }
 
-        center = square_center(&layout, square);
+        center = square_center(&board_surface_layout, square);
         draw_piece_shape(piece, side, center, piece_size, 1.0f);
     }
 
     if (app->move_animating) {
-        Vector2 from = square_center(&layout, app->move_anim_from);
-        Vector2 to = square_center(&layout, app->move_anim_to);
+        Vector2 from = square_center(&board_surface_layout, app->move_anim_from);
+        Vector2 to = square_center(&board_surface_layout, app->move_anim_to);
         float t = app->move_anim_progress;
         float eased;
         Vector2 current;
@@ -879,6 +1086,37 @@ void gui_draw_board(const ChessApp* app) {
 
         draw_piece_shape(app->move_anim_piece, app->move_anim_side, current, piece_size, 1.0f);
     }
+
+    if (in_check && checked_king_square >= 0) {
+        Rectangle king_rect = square_rect(&board_surface_layout, checked_king_square);
+        DrawRectangleLinesEx(king_rect, fmaxf(4.0f, layout.square_size * 0.08f), (Color){199, 36, 48, 255});
+        DrawRectangleLinesEx((Rectangle){king_rect.x + 2.0f, king_rect.y + 2.0f, king_rect.width - 4.0f, king_rect.height - 4.0f},
+                             fmaxf(2.0f, layout.square_size * 0.03f),
+                             (Color){255, 201, 75, 245});
+
+        if (check_attacker_square >= 0) {
+            Rectangle attacker_rect = square_rect(&board_surface_layout, check_attacker_square);
+            DrawRectangleLinesEx(attacker_rect, fmaxf(4.0f, layout.square_size * 0.07f), (Color){255, 205, 68, 255});
+        }
+    }
+
+    EndTextureMode();
+
+    {
+        Rectangle src = {0.0f, 0.0f, (float)board_px, -(float)board_px};
+        Rectangle dst = {
+            layout.board.x + layout.board.width * 0.5f,
+            layout.board.y + layout.board.height * 0.5f,
+            layout.board.width,
+            layout.board.height
+        };
+        Vector2 origin = {layout.board.width * 0.5f, layout.board.height * 0.5f};
+
+        DrawTexturePro(g_board_surface.texture, src, dst, origin, g_board_rotation_deg, WHITE);
+    }
+
+    DrawRectangleRoundedLinesEx(layout.board, 0.02f, 8, 2.0f, palette->board_outline);
+    draw_coordinates(&layout);
 
     {
         float capture_height = layout.sidebar.height * 0.29f;

@@ -303,7 +303,9 @@ void gui_screen_play(struct ChessApp* app) {
         int sub_size = (middle.height < 210.0f) ? 18 : 20;
         int status_size = (middle.height < 210.0f) ? 20 : 22;
         int tiny_size = (middle.height < 210.0f) ? 16 : 18;
-        int info_limit_y = (int)(middle.y + middle.height * 0.58f);
+        bool is_check = engine_in_check(&app->position, app->position.side_to_move);
+        bool is_mate = app->game_over && is_check;
+        int info_limit_y = (int)(middle.y + middle.height * (is_mate ? 0.70f : 0.58f));
         int info_end_y;
         char line[128];
 
@@ -328,6 +330,16 @@ void gui_screen_play(struct ChessApp* app) {
             snprintf(ai_line, sizeof(ai_line), "AI Difficulty: %d%%", app->ai_difficulty);
             draw_text_fit(ai_line, content_x, y, sub_size, content_w, palette->text_secondary);
             y += sub_size + 8;
+        }
+
+        if (is_check && !app->game_over) {
+            draw_text_fit("Check! King is under attack.",
+                          content_x,
+                          y,
+                          status_size + 2,
+                          content_w,
+                          (Color){198, 39, 45, 255});
+            y += status_size + 12;
         }
 
         if (app->mode == MODE_SINGLE && app->ai_thinking) {
@@ -358,17 +370,28 @@ void gui_screen_play(struct ChessApp* app) {
             y += tiny_size + 8;
         }
 
-        if (app->game_over && y + status_size + 10 < info_limit_y) {
+        if (is_mate && y + status_size + 10 < info_limit_y) {
             Side loser = app->position.side_to_move;
-            bool mate = engine_in_check(&app->position, loser);
+            Side winner = (loser == SIDE_WHITE) ? SIDE_BLACK : SIDE_WHITE;
+            const char* title = "CHECKMATE!";
+            int big_size = (middle.height < 240.0f) ? 30 : 36;
+            int sub_win_size = big_size - 10;
+            int title_w = gui_measure_text(title, big_size);
+            int title_x = content_x + (content_w - title_w) / 2;
+            int sub_y;
 
-            if (mate) {
-                Side winner = (loser == SIDE_WHITE) ? SIDE_BLACK : SIDE_WHITE;
-                snprintf(line, sizeof(line), "Checkmate! %s wins.", side_to_text(winner));
-                draw_text_fit(line, content_x, y + 4, status_size, content_w, (Color){184, 36, 42, 255});
-            } else {
-                draw_text_fit("Draw (stalemate).", content_x, y + 4, status_size, content_w, palette->text_primary);
+            gui_draw_text(title, title_x, y + 4, big_size, (Color){191, 34, 46, 255});
+            sub_y = y + big_size + 10;
+            snprintf(line, sizeof(line), "%s wins", side_to_text(winner));
+            {
+                int sub_w = gui_measure_text(line, sub_win_size);
+                int sub_x = content_x + (content_w - sub_w) / 2;
+                gui_draw_text(line, sub_x, sub_y, sub_win_size, (Color){219, 60, 70, 255});
             }
+            y = sub_y + sub_win_size + 8;
+        } else if (app->game_over && y + status_size + 10 < info_limit_y) {
+            draw_text_fit("Draw (stalemate).", content_x, y + 4, status_size + 2, content_w, palette->text_primary);
+            y += status_size + 8;
         }
 
         info_end_y = y;
@@ -415,6 +438,7 @@ void gui_screen_play(struct ChessApp* app) {
         bool online_input_ok = (app->mode != MODE_ONLINE) || (app->online_match_active && app->network.connected);
         bool input_allowed = app_is_human_turn(app) &&
                              !app->move_animating &&
+                             !gui_board_is_rotating() &&
                              online_input_ok &&
                              !(app->mode == MODE_SINGLE && app->ai_thinking);
 
