@@ -39,11 +39,7 @@ get_filename_component(_app_name "${CHESS_APP_EXE}" NAME)
 get_filename_component(_sevenzip_dir "${CHESS_7Z_EXE}" DIRECTORY)
 
 set(_sfx_module "")
-foreach(_candidate IN ITEMS
-    "${_sevenzip_dir}/7zSD.sfx"
-    "${_sevenzip_dir}/7zS2.sfx"
-    "${_sevenzip_dir}/7zS.sfx"
-)
+foreach(_candidate IN ITEMS "${_sevenzip_dir}/7z.sfx")
     if(EXISTS "${_candidate}")
         set(_sfx_module "${_candidate}")
         break()
@@ -51,109 +47,26 @@ foreach(_candidate IN ITEMS
 endforeach()
 
 if(_sfx_module STREQUAL "")
-    set(_sfx_cache_dir "${CHESS_OUT_DIR}/_sfx_cache")
-    set(_sfx_lzma_archive "${_sfx_cache_dir}/lzma_sdk.7z")
-    set(_sfx_extract_dir "${_sfx_cache_dir}/lzma_sdk")
-    set(_sfx_download_url "https://7-zip.org/a/lzma2501.7z")
-
-    file(MAKE_DIRECTORY "${_sfx_cache_dir}")
-
-    if(NOT EXISTS "${_sfx_lzma_archive}")
-        file(DOWNLOAD
-            "${_sfx_download_url}"
-            "${_sfx_lzma_archive}"
-            SHOW_PROGRESS
-            STATUS _dl_status
-        )
-        list(GET _dl_status 0 _dl_code)
-        list(GET _dl_status 1 _dl_msg)
-        if(NOT _dl_code EQUAL 0)
-            message(FATAL_ERROR
-                "Failed to download LZMA SDK for 7z SFX module.\n"
-                "URL: ${_sfx_download_url}\n"
-                "Status: ${_dl_code} (${_dl_msg})")
-        endif()
-    endif()
-
-    if(NOT EXISTS "${_sfx_extract_dir}/bin/7zSD.sfx")
-        file(MAKE_DIRECTORY "${_sfx_extract_dir}")
-        execute_process(
-            COMMAND "${CHESS_7Z_EXE}" x -y "-o${_sfx_extract_dir}" "${_sfx_lzma_archive}" "bin/7zSD.sfx"
-            RESULT_VARIABLE _x_result
-            OUTPUT_VARIABLE _x_stdout
-            ERROR_VARIABLE _x_stderr
-        )
-        if(NOT _x_result EQUAL 0)
-            message(FATAL_ERROR
-                "Failed to extract 7zSD.sfx from LZMA SDK.\n"
-                "stdout:\n${_x_stdout}\n"
-                "stderr:\n${_x_stderr}")
-        endif()
-    endif()
-
-    if(EXISTS "${_sfx_extract_dir}/bin/7zSD.sfx")
-        set(_sfx_module "${_sfx_extract_dir}/bin/7zSD.sfx")
-    endif()
-endif()
-
-if(_sfx_module STREQUAL "")
     message(FATAL_ERROR
-        "Could not find a config-capable 7z SFX module (7zSD.sfx/7zS2.sfx/7zS.sfx).")
+        "Could not find 7z.sfx next to 7z.exe.\n"
+        "Install full 7-Zip package from 7-zip.org and retry.")
 endif()
 
 set(_release_dir "${CHESS_OUT_DIR}")
 set(_stage_dir "${_release_dir}/_onefile_stage")
+set(_stage_chess_dir "${_stage_dir}/chess")
 set(_payload_file "${_release_dir}/chess_payload.7z")
-set(_config_file "${_release_dir}/chess_sfx_config.txt")
 set(_output_file "${_release_dir}/Chess-OneFile.exe")
-set(_launcher_file "${_stage_dir}/launch_chess.bat")
 
 file(REMOVE_RECURSE "${_stage_dir}")
-file(MAKE_DIRECTORY "${_stage_dir}")
 file(MAKE_DIRECTORY "${_release_dir}")
+file(MAKE_DIRECTORY "${_stage_chess_dir}")
 
-file(COPY "${CHESS_APP_EXE}" DESTINATION "${_stage_dir}")
-file(COPY "${CHESS_SOURCE_ASSETS}" DESTINATION "${_stage_dir}")
-file(WRITE "${_launcher_file}" [=[
-@echo off
-setlocal
-set "SRC=%~dp0"
-set "BASE=%CD%\chess"
-set "DST=%BASE%"
-set /a IDX=0
-
-:pick_folder
-if exist "%DST%" (
-    set /a IDX+=1
-    set "DST=%CD%\chess(%IDX%)"
-    goto pick_folder
-)
-
-mkdir "%DST%" >nul 2>&1
-if errorlevel 1 (
-    exit /b 1
-)
-
-xcopy /Y /Q "%SRC%chess_app.exe" "%DST%\" >nul 2>&1
-if exist "%SRC%assets" (
-    xcopy /E /I /Y /Q "%SRC%assets" "%DST%\assets\" >nul 2>&1
-)
-
-start "" "%DST%\chess_app.exe"
-endlocal
-]=])
-
-file(WRITE "${_config_file}" [=[
-;!@Install@!UTF-8!
-Title="Chess"
-InstallPath="%%T\ChessOneFile"
-GUIMode="1"
-RunProgram="launch_chess.bat"
-;!@InstallEnd@!
-]=])
+file(COPY "${CHESS_APP_EXE}" DESTINATION "${_stage_chess_dir}")
+file(COPY "${CHESS_SOURCE_ASSETS}" DESTINATION "${_stage_chess_dir}")
 
 execute_process(
-    COMMAND "${CHESS_7Z_EXE}" a -t7z -mx=9 -bd -y "${_payload_file}" "${_app_name}" "assets" "launch_chess.bat"
+    COMMAND "${CHESS_7Z_EXE}" a -t7z -mx=9 -bd -y "${_payload_file}" "chess"
     WORKING_DIRECTORY "${_stage_dir}"
     RESULT_VARIABLE _pack_result
     OUTPUT_VARIABLE _pack_stdout
@@ -171,7 +84,6 @@ set(_concat_ps1 "${_release_dir}/concat_onefile.ps1")
 file(WRITE "${_concat_ps1}" [=[
 param(
     [Parameter(Mandatory = $true)][string]$Sfx,
-    [Parameter(Mandatory = $true)][string]$Cfg,
     [Parameter(Mandatory = $true)][string]$Payload,
     [Parameter(Mandatory = $true)][string]$Out
 )
@@ -185,7 +97,7 @@ if (-not (Test-Path -LiteralPath $outDir)) {
 
 $dst = [System.IO.File]::Open($Out, [System.IO.FileMode]::Create, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
 try {
-    foreach ($src in @($Sfx, $Cfg, $Payload)) {
+    foreach ($src in @($Sfx, $Payload)) {
         $data = [System.IO.File]::ReadAllBytes($src)
         $dst.Write($data, 0, $data.Length)
     }
@@ -199,7 +111,6 @@ execute_process(
     COMMAND powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass
         -File "${_concat_ps1}"
         -Sfx "${_sfx_module}"
-        -Cfg "${_config_file}"
         -Payload "${_payload_file}"
         -Out "${_output_file}"
     RESULT_VARIABLE _copy_result
@@ -216,7 +127,6 @@ endif()
 
 file(REMOVE_RECURSE "${_stage_dir}")
 file(REMOVE "${_payload_file}")
-file(REMOVE "${_config_file}")
 file(REMOVE "${_concat_ps1}")
 
 message(STATUS "One-file package created: ${_output_file}")
