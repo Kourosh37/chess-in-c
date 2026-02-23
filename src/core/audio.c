@@ -15,7 +15,6 @@ static AudioSlot g_slots[AUDIO_SFX_COUNT] = {
     {.filename = "ui_click.wav", .sound = {{0}}, .loaded = false},
     {.filename = "piece_move.wav", .sound = {{0}}, .loaded = false},
     {.filename = "piece_capture.wav", .sound = {{0}}, .loaded = false},
-    {.filename = "piece_castle.wav", .sound = {{0}}, .loaded = false},
     {.filename = "piece_promotion.wav", .sound = {{0}}, .loaded = false},
     {.filename = "king_check.wav", .sound = {{0}}, .loaded = false},
     {.filename = "game_over.wav", .sound = {{0}}, .loaded = false},

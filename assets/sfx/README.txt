@@ -3,7 +3,6 @@ Place sound effects in this folder using the exact filenames below:
 ui_click.wav
 piece_move.wav
 piece_capture.wav
-piece_castle.wav
 piece_promotion.wav
 king_check.wav
 game_over.wav

@@ -1678,7 +1678,7 @@ bool app_apply_move(ChessApp* app, Move move) {
     if ((move.flags & MOVE_FLAG_PROMOTION) != 0U) {
         move_sfx = AUDIO_SFX_PROMOTION;
     } else if (is_castle) {
-        AudioSfx castle_step_sfx = audio_is_loaded(AUDIO_SFX_MOVE) ? AUDIO_SFX_MOVE : AUDIO_SFX_CASTLE;
+        AudioSfx castle_step_sfx = AUDIO_SFX_MOVE;
         move_sfx = castle_step_sfx;
         app->delayed_sfx_pending = true;
         app->delayed_sfx_timer = CASTLE_SECOND_SFX_DELAY_SECONDS;
