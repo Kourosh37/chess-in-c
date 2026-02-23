@@ -39,7 +39,7 @@ OBJ = $(SRC:.c=.o)
 
 ifeq ($(OS),Windows_NT)
 	CFLAGS += $(THREAD_FLAGS)
-	LDFLAGS += $(THREAD_FLAGS)
+	LDFLAGS += $(THREAD_FLAGS) -mwindows
 	LIBS += -lraylib -lopengl32 -lgdi32 -lwinmm -lws2_32
 else
 	CFLAGS += $(THREAD_FLAGS)

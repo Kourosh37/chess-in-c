@@ -75,6 +75,8 @@ endif()
 
 # Explicit Windows system libraries for MinGW/clang toolchains.
 if(WIN32)
+    # Build as a GUI app (no console window) on Windows.
+    set_target_properties(chess_app PROPERTIES WIN32_EXECUTABLE TRUE)
     target_link_libraries(chess_app PRIVATE ws2_32 gdi32 winmm opengl32 crypt32)
 endif()
 

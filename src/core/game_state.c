@@ -10,6 +10,7 @@
 #else
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <unistd.h>
 #endif
 
 #include "audio.h"
@@ -58,6 +59,82 @@ typedef struct PersistedOnlineMatch {
     char move_log[MOVE_LOG_MAX][64];
 } PersistedOnlineMatch;
 
+/* Resolves directory of currently running executable. */
+static bool resolve_executable_dir(char out_dir[STORAGE_PATH_MAX]) {
+    if (out_dir == NULL) {
+        return false;
+    }
+
+#ifdef _WIN32
+    {
+        char module_path[STORAGE_PATH_MAX];
+        char* slash;
+        char* alt;
+        DWORD len = GetModuleFileNameA(NULL, module_path, (DWORD)sizeof(module_path));
+
+        if (len == 0U || len >= (DWORD)sizeof(module_path)) {
+            return false;
+        }
+        module_path[len] = '\0';
+
+        slash = strrchr(module_path, '\\');
+        alt = strrchr(module_path, '/');
+        if (slash == NULL || (alt != NULL && alt > slash)) {
+            slash = alt;
+        }
+        if (slash == NULL) {
+            return false;
+        }
+
+        *slash = '\0';
+        strncpy(out_dir, module_path, STORAGE_PATH_MAX - 1);
+        out_dir[STORAGE_PATH_MAX - 1] = '\0';
+        return out_dir[0] != '\0';
+    }
+#else
+    {
+        char module_path[STORAGE_PATH_MAX];
+        ssize_t len = readlink("/proc/self/exe", module_path, sizeof(module_path) - 1);
+
+        if (len > 0 && (size_t)len < sizeof(module_path)) {
+            char* slash;
+            module_path[len] = '\0';
+            slash = strrchr(module_path, '/');
+            if (slash != NULL) {
+                *slash = '\0';
+                strncpy(out_dir, module_path, STORAGE_PATH_MAX - 1);
+                out_dir[STORAGE_PATH_MAX - 1] = '\0';
+                return out_dir[0] != '\0';
+            }
+        }
+
+        if (getcwd(out_dir, STORAGE_PATH_MAX) != NULL) {
+            out_dir[STORAGE_PATH_MAX - 1] = '\0';
+            return true;
+        }
+    }
+#endif
+
+    return false;
+}
+
+/* Builds all storage file paths inside one target directory. */
+static void set_storage_paths_from_dir(const char* dir) {
+    if (dir == NULL || dir[0] == '\0') {
+        return;
+    }
+
+#ifdef _WIN32
+    snprintf(g_profile_path, sizeof(g_profile_path), "%s\\profile.dat", dir);
+    snprintf(g_settings_path, sizeof(g_settings_path), "%s\\settings.dat", dir);
+    snprintf(g_online_sessions_path, sizeof(g_online_sessions_path), "%s\\online_matches.dat", dir);
+#else
+    snprintf(g_profile_path, sizeof(g_profile_path), "%s/profile.dat", dir);
+    snprintf(g_settings_path, sizeof(g_settings_path), "%s/settings.dat", dir);
+    snprintf(g_online_sessions_path, sizeof(g_online_sessions_path), "%s/online_matches.dat", dir);
+#endif
+}
+
 /* Returns true when a file path currently exists. */
 static bool file_exists(const char* path) {
     FILE* file;
@@ -73,19 +150,6 @@ static bool file_exists(const char* path) {
 
     fclose(file);
     return true;
-}
-
-/* Creates one directory if missing (best-effort). */
-static void create_dir_if_missing(const char* path) {
-    if (path == NULL || path[0] == '\0') {
-        return;
-    }
-
-#ifdef _WIN32
-    CreateDirectoryA(path, NULL);
-#else
-    mkdir(path, 0700);
-#endif
 }
 
 /* Reads one raw file payload without applying encryption/decryption. */
@@ -167,8 +231,10 @@ static void migrate_legacy_file(const char* legacy_path, const char* secure_path
     free(raw);
 }
 
-/* Resolves user data paths to one OS data directory and migrates legacy files. */
+/* Resolves storage paths next to executable and migrates legacy data when needed. */
 static void init_storage_paths(void) {
+    char exe_dir[STORAGE_PATH_MAX];
+
     if (g_storage_paths_ready) {
         return;
     }
@@ -180,39 +246,38 @@ static void init_storage_paths(void) {
     strncpy(g_online_sessions_path, LEGACY_ONLINE_SESSIONS_PATH, sizeof(g_online_sessions_path) - 1);
     g_online_sessions_path[sizeof(g_online_sessions_path) - 1] = '\0';
 
-#ifdef _WIN32
-    {
-        char local_appdata[STORAGE_PATH_MAX];
-        DWORD len = GetEnvironmentVariableA("LOCALAPPDATA", local_appdata, (DWORD)sizeof(local_appdata));
-
-        if (len > 0U && len < (DWORD)sizeof(local_appdata)) {
-            char app_root[STORAGE_PATH_MAX];
-            char secure_dir[STORAGE_PATH_MAX];
-
-            snprintf(app_root, sizeof(app_root), "%s\\Chess", local_appdata);
-            snprintf(secure_dir, sizeof(secure_dir), "%s\\SecureData", app_root);
-
-            create_dir_if_missing(app_root);
-            create_dir_if_missing(secure_dir);
-            {
-                DWORD attrs = GetFileAttributesA(secure_dir);
-                if (attrs != INVALID_FILE_ATTRIBUTES) {
-                    SetFileAttributesA(secure_dir, attrs | FILE_ATTRIBUTE_HIDDEN);
-                }
-            }
-
-            snprintf(g_profile_path, sizeof(g_profile_path), "%s\\profile.dat", secure_dir);
-            snprintf(g_settings_path, sizeof(g_settings_path), "%s\\settings.dat", secure_dir);
-            snprintf(g_online_sessions_path, sizeof(g_online_sessions_path), "%s\\online_matches.dat", secure_dir);
-        }
+    if (resolve_executable_dir(exe_dir)) {
+        set_storage_paths_from_dir(exe_dir);
     }
-#endif
 
     g_storage_paths_ready = true;
 
     migrate_legacy_file(LEGACY_PROFILE_PATH, g_profile_path);
     migrate_legacy_file(LEGACY_SETTINGS_PATH, g_settings_path);
     migrate_legacy_file(LEGACY_ONLINE_SESSIONS_PATH, g_online_sessions_path);
+
+#ifdef _WIN32
+    {
+        char local_appdata[STORAGE_PATH_MAX];
+        DWORD len = GetEnvironmentVariableA("LOCALAPPDATA", local_appdata, (DWORD)sizeof(local_appdata));
+
+        if (len > 0U && len < (DWORD)sizeof(local_appdata)) {
+            char secure_dir[STORAGE_PATH_MAX];
+            char old_profile_path[STORAGE_PATH_MAX];
+            char old_settings_path[STORAGE_PATH_MAX];
+            char old_sessions_path[STORAGE_PATH_MAX];
+
+            snprintf(secure_dir, sizeof(secure_dir), "%s\\Chess\\SecureData", local_appdata);
+            snprintf(old_profile_path, sizeof(old_profile_path), "%s\\profile.dat", secure_dir);
+            snprintf(old_settings_path, sizeof(old_settings_path), "%s\\settings.dat", secure_dir);
+            snprintf(old_sessions_path, sizeof(old_sessions_path), "%s\\online_matches.dat", secure_dir);
+
+            migrate_legacy_file(old_profile_path, g_profile_path);
+            migrate_legacy_file(old_settings_path, g_settings_path);
+            migrate_legacy_file(old_sessions_path, g_online_sessions_path);
+        }
+    }
+#endif
 }
 
 /* Clamps AI difficulty percentage into safe 0..100 range. */
