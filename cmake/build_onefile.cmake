@@ -56,7 +56,7 @@ set(_release_dir "${CHESS_OUT_DIR}")
 set(_stage_dir "${_release_dir}/_onefile_stage")
 set(_stage_chess_dir "${_stage_dir}/chess")
 set(_payload_file "${_release_dir}/chess_payload.7z")
-set(_output_file "${_release_dir}/Chess-OneFile.exe")
+set(_output_file "${_release_dir}/chess.exe")
 
 file(REMOVE_RECURSE "${_stage_dir}")
 file(MAKE_DIRECTORY "${_release_dir}")

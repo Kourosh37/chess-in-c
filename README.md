@@ -166,7 +166,7 @@ tools\package_onefile.bat
 Output file:
 
 ```text
-build/release/Chess-OneFile.exe
+build/release/chess.exe
 ```
 
 ## Configuration Options

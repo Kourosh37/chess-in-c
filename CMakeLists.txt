@@ -75,6 +75,36 @@ endif()
 
 # Explicit Windows system libraries for MinGW/clang toolchains.
 if(WIN32)
+    # Embed icon in chess_app.exe so Explorer/Desktop shows custom file icon.
+    set(CHESS_ICON_PNG "${CMAKE_SOURCE_DIR}/assets/icons/app_icon.png")
+    set(CHESS_ICON_ICO "${CMAKE_BINARY_DIR}/generated/chess_app_icon.ico")
+    set(CHESS_ICON_RC "${CMAKE_BINARY_DIR}/generated/chess_app_icon.rc")
+
+    if(EXISTS "${CHESS_ICON_PNG}")
+        execute_process(
+            COMMAND powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass
+                -File "${CMAKE_SOURCE_DIR}/cmake/png_to_ico.ps1"
+                -InputPng "${CHESS_ICON_PNG}"
+                -OutputIco "${CHESS_ICON_ICO}"
+            RESULT_VARIABLE _icon_conv_result
+            OUTPUT_VARIABLE _icon_conv_stdout
+            ERROR_VARIABLE _icon_conv_stderr
+        )
+
+        if(_icon_conv_result EQUAL 0 AND EXISTS "${CHESS_ICON_ICO}")
+            file(TO_CMAKE_PATH "${CHESS_ICON_ICO}" CHESS_ICON_ICO_RC_PATH)
+            file(WRITE "${CHESS_ICON_RC}" "IDI_APP_ICON ICON \"${CHESS_ICON_ICO_RC_PATH}\"\n")
+            target_sources(chess_app PRIVATE "${CHESS_ICON_RC}")
+        else()
+            message(WARNING
+                "Could not generate embedded EXE icon from ${CHESS_ICON_PNG}.\n"
+                "stdout:\n${_icon_conv_stdout}\n"
+                "stderr:\n${_icon_conv_stderr}")
+        endif()
+    else()
+        message(WARNING "Window icon PNG not found for EXE embedding: ${CHESS_ICON_PNG}")
+    endif()
+
     # Build as a GUI app (no console window) on Windows.
     set_target_properties(chess_app PROPERTIES WIN32_EXECUTABLE TRUE)
     target_link_libraries(chess_app PRIVATE ws2_32 gdi32 winmm opengl32 crypt32)

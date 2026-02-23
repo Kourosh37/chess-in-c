@@ -16,13 +16,58 @@
 /* Runtime-loaded window icon path (place PNG image here). */
 #define WINDOW_ICON_PATH "assets/icons/app_icon.png"
 
+/* Tries to load one icon image and apply it to the window. */
+static bool try_apply_window_icon_from_path(const char* path) {
+    if (path == NULL || path[0] == '\0' || !FileExists(path)) {
+        return false;
+    }
+
+    Image icon = LoadImage(path);
+    if (icon.data == NULL || icon.width <= 0 || icon.height <= 0) {
+        if (icon.data != NULL) {
+            UnloadImage(icon);
+        }
+        return false;
+    }
+
+    if (icon.format != PIXELFORMAT_UNCOMPRESSED_R8G8B8A8) {
+        ImageFormat(&icon, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8);
+    }
+    if (icon.data == NULL || icon.format != PIXELFORMAT_UNCOMPRESSED_R8G8B8A8) {
+        if (icon.data != NULL) {
+            UnloadImage(icon);
+        }
+        return false;
+    }
+
+    SetWindowIcon(icon);
+    UnloadImage(icon);
+    return true;
+}
+
 /* Loads and applies window icon from assets when file is available. */
 static void try_set_window_icon(void) {
-    if (FileExists(WINDOW_ICON_PATH)) {
-        Image icon = LoadImage(WINDOW_ICON_PATH);
-        if (icon.data != NULL) {
-            SetWindowIcon(icon);
-            UnloadImage(icon);
+    const char* exe_dir = GetApplicationDirectory();
+    char candidate[1024];
+
+    if (try_apply_window_icon_from_path(WINDOW_ICON_PATH)) {
+        return;
+    }
+
+    if (exe_dir != NULL && exe_dir[0] != '\0') {
+        snprintf(candidate, sizeof(candidate), "%sassets/icons/app_icon.png", exe_dir);
+        if (try_apply_window_icon_from_path(candidate)) {
+            return;
+        }
+
+        snprintf(candidate, sizeof(candidate), "%s../assets/icons/app_icon.png", exe_dir);
+        if (try_apply_window_icon_from_path(candidate)) {
+            return;
+        }
+
+        snprintf(candidate, sizeof(candidate), "%s../../assets/icons/app_icon.png", exe_dir);
+        if (try_apply_window_icon_from_path(candidate)) {
+            return;
         }
     }
 }

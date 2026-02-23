@@ -13,6 +13,6 @@ if errorlevel 1 (
 
 echo.
 echo One-file package created:
-echo   build\release\Chess-OneFile.exe
+echo   build\release\chess.exe
 
 endlocal
