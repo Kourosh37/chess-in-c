@@ -17,6 +17,9 @@
 *.exe
 *.out
 
+# Keep explicitly added runtime DLLs at repository root (for one-file packaging).
+!/*.dll
+
 # Ninja / CMake generated files
 CMakeCache.txt
 CMakeFiles/
