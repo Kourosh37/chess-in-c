@@ -773,13 +773,7 @@ static void load_settings(ChessApp* app) {
     }
 
     if (has_turn_time_seconds) {
-        if (parsed_turn_time_seconds >= 10) {
-            app->turn_timer_enabled = true;
-            app->turn_time_seconds = parsed_turn_time_seconds;
-        } else {
-            app->turn_timer_enabled = false;
-            app->turn_time_seconds = 0;
-        }
+        app->turn_time_seconds = (parsed_turn_time_seconds >= 10) ? parsed_turn_time_seconds : 0;
     }
 
     if (has_turn_timer_enabled) {

@@ -356,7 +356,6 @@ void gui_screen_settings(struct ChessApp* app) {
     {
         char value[32];
         float ai_value = (float)app->ai_difficulty;
-        float timer_value = app->turn_timer_enabled ? (float)app->turn_time_seconds : 0.0f;
         int theme_count = gui_theme_count();
         float pad_x = 16.0f;
         float pad_y = 9.0f;
@@ -458,7 +457,16 @@ void gui_screen_settings(struct ChessApp* app) {
 
         {
             char timer_text[32];
-            int rounded;
+            Rectangle buttons_area;
+            Rectangle off_btn;
+            Rectangle b10;
+            Rectangle b30;
+            Rectangle b60;
+            Rectangle b120;
+            float pad_x = 16.0f;
+            float gap = 6.0f;
+            float btn_h = 28.0f;
+            float btn_w;
 
             if (app->turn_timer_enabled && app->turn_time_seconds >= 10) {
                 snprintf(timer_text, sizeof(timer_text), "%ds", app->turn_time_seconds);
@@ -466,20 +474,56 @@ void gui_screen_settings(struct ChessApp* app) {
                 snprintf(timer_text, sizeof(timer_text), "Off");
             }
 
-            if (draw_slider_row("Turn Timer", timer_text, timer_row, &timer_value, 0.0f, 300.0f)) {
-                rounded = (int)lroundf(timer_value);
-                if (rounded <= 0) {
-                    app->turn_timer_enabled = false;
-                    app->turn_time_seconds = 0;
-                    app->turn_time_remaining = 0.0f;
-                } else {
-                    if (rounded < 10) {
-                        rounded = 10;
-                    }
-                    app->turn_timer_enabled = true;
-                    app->turn_time_seconds = rounded;
-                    app->turn_time_remaining = (float)rounded;
-                }
+            DrawRectangleRounded(timer_row, 0.10f, 8, Fade(palette->panel, 0.92f));
+            DrawRectangleRoundedLinesEx(timer_row, 0.10f, 8, 1.0f, palette->panel_border);
+            gui_draw_text("Turn Timer", (int)timer_row.x + 16, (int)timer_row.y + 8, 21, palette->text_primary);
+            gui_draw_text(timer_text,
+                          (int)(timer_row.x + timer_row.width - 16.0f - (float)gui_measure_text(timer_text, 20)),
+                          (int)timer_row.y + 8,
+                          20,
+                          palette->accent);
+
+            buttons_area = (Rectangle){
+                timer_row.x + pad_x,
+                timer_row.y + timer_row.height - btn_h - 8.0f,
+                timer_row.width - pad_x * 2.0f,
+                btn_h
+            };
+            btn_w = (buttons_area.width - gap * 4.0f) / 5.0f;
+            off_btn = (Rectangle){buttons_area.x, buttons_area.y, btn_w, btn_h};
+            b10 = (Rectangle){off_btn.x + btn_w + gap, buttons_area.y, btn_w, btn_h};
+            b30 = (Rectangle){b10.x + btn_w + gap, buttons_area.y, btn_w, btn_h};
+            b60 = (Rectangle){b30.x + btn_w + gap, buttons_area.y, btn_w, btn_h};
+            b120 = (Rectangle){b60.x + btn_w + gap, buttons_area.y, btn_w, btn_h};
+
+            if (gui_button(off_btn, "Off")) {
+                app->turn_timer_enabled = false;
+                app->turn_time_seconds = 0;
+                app->turn_time_remaining = 0.0f;
+                dirty = true;
+            }
+            if (gui_button(b10, "10s")) {
+                app->turn_timer_enabled = true;
+                app->turn_time_seconds = 10;
+                app->turn_time_remaining = 10.0f;
+                dirty = true;
+            }
+            if (gui_button(b30, "30s")) {
+                app->turn_timer_enabled = true;
+                app->turn_time_seconds = 30;
+                app->turn_time_remaining = 30.0f;
+                dirty = true;
+            }
+            if (gui_button(b60, "60s")) {
+                app->turn_timer_enabled = true;
+                app->turn_time_seconds = 60;
+                app->turn_time_remaining = 60.0f;
+                dirty = true;
+            }
+            if (gui_button(b120, "120s")) {
+                app->turn_timer_enabled = true;
+                app->turn_time_seconds = 120;
+                app->turn_time_remaining = 120.0f;
                 dirty = true;
             }
         }
@@ -487,9 +531,9 @@ void gui_screen_settings(struct ChessApp* app) {
         {
             Rectangle name_input = {
                 online_name_row.x + 14.0f,
-                online_name_row.y + 36.0f,
+                online_name_row.y + 30.0f,
                 online_name_row.width - 28.0f,
-                online_name_row.height - 44.0f
+                online_name_row.height - 38.0f
             };
             char before_name[PLAYER_NAME_MAX + 1];
 
@@ -514,11 +558,11 @@ void gui_screen_settings(struct ChessApp* app) {
             }
 
             if (app->online_name[0] == '\0') {
-                draw_text_fit("Required for online mode.",
-                              (int)online_name_row.x + 16,
-                              (int)online_name_row.y + (int)online_name_row.height - 18,
+                draw_text_fit("Required for online games",
+                              (int)online_name_row.x + (int)online_name_row.width - 250,
+                              (int)online_name_row.y + 12,
                               16,
-                              (int)online_name_row.width - 32,
+                              230,
                               palette->text_secondary);
             }
         }
