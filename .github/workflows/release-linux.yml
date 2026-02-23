@@ -73,6 +73,7 @@ jobs:
 
           chmod +x "$RUN_FILE"
           rm -rf /tmp/chess-run-extract /tmp/chess-tar-extract
+          mkdir -p /tmp/chess-run-extract /tmp/chess-tar-extract
           "$RUN_FILE" /tmp/chess-run-extract
           tar -xzf "$TAR_FILE" -C /tmp/chess-tar-extract
 
