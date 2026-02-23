@@ -597,10 +597,15 @@ static void maybe_process_network(ChessApp* app) {
             }
 
             if (packet.type == NET_MSG_JOIN_REQUEST) {
-                if (match->network.connected && match->network.is_host) {
+                bool host_side = match->is_host || match->network.is_host;
+
+                if (host_side) {
                     audio_play(AUDIO_SFX_LOBBY_JOIN);
+                }
+
+                if (host_side) {
                     match->is_host = true;
-                    match->connected = true;
+                    match->connected = match->network.connected;
                     match->local_side = match->network.host_side;
                     match->local_ready = false;
                     match->peer_ready = false;
