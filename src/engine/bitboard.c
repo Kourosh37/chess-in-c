@@ -1,5 +1,6 @@
 #include "engine.h"
 
+#include <ctype.h>
 #include <string.h>
 #include <time.h>
 
@@ -53,6 +54,98 @@ static uint64_t rng_next_u64(void) {
 /* True when square index is in [0, 63]. */
 static bool is_square_on_board(int square) {
     return square >= 0 && square < BOARD_SQUARES;
+}
+
+/* Parses one piece designator from FEN board field. */
+static bool fen_piece_from_char(char ch, Side* out_side, PieceType* out_piece) {
+    if (out_side == NULL || out_piece == NULL) {
+        return false;
+    }
+
+    switch (ch) {
+        case 'P':
+            *out_side = SIDE_WHITE;
+            *out_piece = PIECE_PAWN;
+            return true;
+        case 'N':
+            *out_side = SIDE_WHITE;
+            *out_piece = PIECE_KNIGHT;
+            return true;
+        case 'B':
+            *out_side = SIDE_WHITE;
+            *out_piece = PIECE_BISHOP;
+            return true;
+        case 'R':
+            *out_side = SIDE_WHITE;
+            *out_piece = PIECE_ROOK;
+            return true;
+        case 'Q':
+            *out_side = SIDE_WHITE;
+            *out_piece = PIECE_QUEEN;
+            return true;
+        case 'K':
+            *out_side = SIDE_WHITE;
+            *out_piece = PIECE_KING;
+            return true;
+        case 'p':
+            *out_side = SIDE_BLACK;
+            *out_piece = PIECE_PAWN;
+            return true;
+        case 'n':
+            *out_side = SIDE_BLACK;
+            *out_piece = PIECE_KNIGHT;
+            return true;
+        case 'b':
+            *out_side = SIDE_BLACK;
+            *out_piece = PIECE_BISHOP;
+            return true;
+        case 'r':
+            *out_side = SIDE_BLACK;
+            *out_piece = PIECE_ROOK;
+            return true;
+        case 'q':
+            *out_side = SIDE_BLACK;
+            *out_piece = PIECE_QUEEN;
+            return true;
+        case 'k':
+            *out_side = SIDE_BLACK;
+            *out_piece = PIECE_KING;
+            return true;
+        default:
+            break;
+    }
+
+    return false;
+}
+
+/* Parses one non-negative integer field from FEN. */
+static bool fen_parse_uint_field(const char** cursor, unsigned* out_value) {
+    const char* p;
+    unsigned value = 0U;
+    bool has_digit = false;
+
+    if (cursor == NULL || *cursor == NULL || out_value == NULL) {
+        return false;
+    }
+
+    p = *cursor;
+    while (*p == ' ') {
+        p++;
+    }
+
+    while (isdigit((unsigned char)*p) != 0) {
+        has_digit = true;
+        value = value * 10U + (unsigned)(*p - '0');
+        p++;
+    }
+
+    if (!has_digit) {
+        return false;
+    }
+
+    *cursor = p;
+    *out_value = value;
+    return true;
 }
 
 /* Builds knight attack lookup table for all squares. */
@@ -218,6 +311,169 @@ void position_set_start(Position* pos) {
 
     position_refresh_occupancy(pos);
     pos->zobrist_key = position_compute_zobrist(pos);
+}
+
+/* Loads arbitrary legal/illegal setup from a FEN string for analysis/testing. */
+bool position_set_from_fen(Position* pos, const char* fen) {
+    const char* p;
+    int rank = 7;
+    int file = 0;
+
+    if (pos == NULL || fen == NULL) {
+        return false;
+    }
+
+    position_set_empty(pos);
+    p = fen;
+
+    while (*p != '\0' && *p != ' ') {
+        char ch = *p;
+
+        if (ch == '/') {
+            if (file != 8 || rank <= 0) {
+                return false;
+            }
+            rank--;
+            file = 0;
+            p++;
+            continue;
+        }
+
+        if (ch >= '1' && ch <= '8') {
+            file += (int)(ch - '0');
+            if (file > 8) {
+                return false;
+            }
+            p++;
+            continue;
+        }
+
+        {
+            Side side;
+            PieceType piece;
+            int square;
+
+            if (!fen_piece_from_char(ch, &side, &piece)) {
+                return false;
+            }
+            if (file >= 8) {
+                return false;
+            }
+
+            square = (rank << 3) | file;
+            pos->pieces[side][piece] |= bb_square(square);
+            file++;
+            p++;
+        }
+    }
+
+    if (rank != 0 || file != 8) {
+        return false;
+    }
+    if (*p != ' ') {
+        return false;
+    }
+
+    while (*p == ' ') {
+        p++;
+    }
+    if (*p == 'w') {
+        pos->side_to_move = SIDE_WHITE;
+        p++;
+    } else if (*p == 'b') {
+        pos->side_to_move = SIDE_BLACK;
+        p++;
+    } else {
+        return false;
+    }
+    if (*p != ' ') {
+        return false;
+    }
+
+    while (*p == ' ') {
+        p++;
+    }
+    pos->castling_rights = 0U;
+    if (*p == '-') {
+        p++;
+    } else {
+        while (*p != '\0' && *p != ' ') {
+            if (*p == 'K') {
+                pos->castling_rights |= 0x01;
+            } else if (*p == 'Q') {
+                pos->castling_rights |= 0x02;
+            } else if (*p == 'k') {
+                pos->castling_rights |= 0x04;
+            } else if (*p == 'q') {
+                pos->castling_rights |= 0x08;
+            } else {
+                return false;
+            }
+            p++;
+        }
+    }
+    if (*p != ' ') {
+        return false;
+    }
+
+    while (*p == ' ') {
+        p++;
+    }
+    if (*p == '-') {
+        pos->en_passant_square = -1;
+        p++;
+    } else {
+        int ep_file;
+        int ep_rank;
+
+        if (p[0] < 'a' || p[0] > 'h' || p[1] < '1' || p[1] > '8') {
+            return false;
+        }
+
+        ep_file = p[0] - 'a';
+        ep_rank = p[1] - '1';
+        pos->en_passant_square = (int8_t)((ep_rank << 3) | ep_file);
+        p += 2;
+    }
+
+    pos->halfmove_clock = 0;
+    pos->fullmove_number = 1;
+
+    if (*p != '\0') {
+        unsigned halfmove = 0U;
+        unsigned fullmove = 1U;
+
+        while (*p == ' ') {
+            p++;
+        }
+
+        if (*p != '\0') {
+            if (!fen_parse_uint_field(&p, &halfmove)) {
+                return false;
+            }
+            while (*p == ' ') {
+                p++;
+            }
+            if (*p != '\0') {
+                if (!fen_parse_uint_field(&p, &fullmove)) {
+                    return false;
+                }
+                while (*p == ' ') {
+                    p++;
+                }
+                if (*p != '\0') {
+                    return false;
+                }
+            }
+        }
+
+        pos->halfmove_clock = (halfmove > 65535U) ? 65535U : (uint16_t)halfmove;
+        pos->fullmove_number = (fullmove == 0U) ? 1U : ((fullmove > 65535U) ? 65535U : (uint16_t)fullmove);
+    }
+
+    position_refresh_occupancy(pos);
+    pos->zobrist_key = position_compute_zobrist(pos);
+    return true;
 }
 
 /* Computes full zobrist hash for a position snapshot. */

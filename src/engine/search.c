@@ -22,6 +22,9 @@
 #define SEARCH_MAX_DEPTH 14
 #define MAX_SEARCH_PLY 128
 #define MAX_HISTORY_PLY 256
+#define ASPIRATION_BASE_WINDOW 35
+#define ASPIRATION_MIN_DEPTH 3
+#define ASPIRATION_MAX_WINDOW 1200
 
 /* Castling rights bit layout (KQkq) used by evaluation heuristics. */
 #define CASTLE_WHITE_KING  0x01
@@ -830,25 +833,25 @@ static int king_safety_score(const Position* pos, Side side, int phase) {
     }
 
     if (side_is_castled(pos, side)) {
-        score += 42;
+        score += 52;
     } else {
         bool rights = false;
         if (side == SIDE_WHITE) {
             rights = (pos->castling_rights & (CASTLE_WHITE_KING | CASTLE_WHITE_QUEEN)) != 0U;
             if (king_sq == 4 || king_sq == 3 || king_sq == 5) {
-                score -= 18;
+                score -= 24;
             }
         } else {
             rights = (pos->castling_rights & (CASTLE_BLACK_KING | CASTLE_BLACK_QUEEN)) != 0U;
             if (king_sq == 60 || king_sq == 59 || king_sq == 61) {
-                score -= 18;
+                score -= 24;
             }
         }
 
         if (rights) {
-            score += 10;
+            score += 6;
         } else {
-            score -= 26;
+            score -= 34;
         }
     }
 
@@ -867,7 +870,7 @@ static int king_safety_score(const Position* pos, Side side, int phase) {
             if ((pawns & bb_square(shield_rank * 8 + f)) != 0ULL) {
                 score += 7;
             } else {
-                score -= 7;
+                score -= 9;
             }
         }
     }
@@ -919,7 +922,7 @@ static int king_safety_score(const Position* pos, Side side, int phase) {
             }
         }
 
-        score -= attackers * ((phase >= 14) ? 9 : 5);
+        score -= attackers * ((phase >= 14) ? 11 : 6);
     }
 
     return score;
@@ -1091,6 +1094,7 @@ static int negamax(const Position* pos, int depth, int alpha, int beta, int ply,
     TTEntry* entry;
     Move tt_move = {0};
     bool in_check;
+    int static_eval = 0;
     int best_score = -INF_SCORE;
     Move best_move = {0};
     MoveList moves;
@@ -1149,9 +1153,25 @@ static int negamax(const Position* pos, int depth, int alpha, int beta, int ply,
         depth++;
     }
 
+    static_eval = evaluate_for_side(pos);
+
+    if (!in_check && depth <= 2 && static_eval + (120 * depth) <= alpha) {
+        result = quiescence(pos, alpha, beta, ply, ctx);
+        goto cleanup;
+    }
+
+    if (!in_check && depth <= 3 && beta < MATE_BOUND) {
+        int rfp_margin = 85 * depth;
+        if (static_eval - rfp_margin >= beta) {
+            result = static_eval - rfp_margin;
+            goto cleanup;
+        }
+    }
+
     if (depth >= 3 &&
         !in_check &&
         beta < MATE_BOUND &&
+        static_eval >= (beta - 40) &&
         side_has_non_pawn_material(pos, pos->side_to_move)) {
         Position null_pos = *pos;
         int reduction = 2 + ((depth >= 7) ? 1 : 0);
@@ -1191,6 +1211,8 @@ static int negamax(const Position* pos, int depth, int alpha, int beta, int ply,
         int child_depth = depth - 1;
         int score;
         bool tactical = ((move.flags & MOVE_FLAG_CAPTURE) != 0U) || ((move.flags & MOVE_FLAG_PROMOTION) != 0U);
+        bool quiet_non_castle = !tactical &&
+            (move.flags & (MOVE_FLAG_KING_CASTLE | MOVE_FLAG_QUEEN_CASTLE)) == 0U;
         bool gives_check;
 
         if (!engine_apply_move(&next, move)) {
@@ -1199,10 +1221,23 @@ static int negamax(const Position* pos, int depth, int alpha, int beta, int ply,
 
         gives_check = engine_in_check(&next, next.side_to_move);
 
+        if (!in_check && !gives_check && quiet_non_castle && i > 0) {
+            if (depth <= 3) {
+                int lmp_threshold = 4 + (depth * depth);
+                int futility_margin = 85 * depth + ((i >= 6) ? 30 : 0);
+
+                if (i >= lmp_threshold) {
+                    continue;
+                }
+                if (static_eval + futility_margin <= alpha) {
+                    continue;
+                }
+            }
+        }
+
         if (!in_check &&
             !gives_check &&
-            !tactical &&
-            (move.flags & (MOVE_FLAG_KING_CASTLE | MOVE_FLAG_QUEEN_CASTLE)) == 0U &&
+            quiet_non_castle &&
             depth >= 4 &&
             i >= 3) {
             int reduction = 1;
@@ -1454,12 +1489,15 @@ void search_best_move(const Position* pos, const SearchLimits* limits, SearchRes
     for (int depth = 1; depth <= local_limits.depth; ++depth) {
         Move tt_move = {0};
         TTEntry* root_entry = &g_tt[pos->zobrist_key & (TT_SIZE - 1)];
-        MoveList depth_moves = root_moves;
-        int depth_best_score = -INF_SCORE;
-        Move depth_best_move = depth_moves.moves[0];
-        bool completed = false;
+        int aspiration_window = ASPIRATION_BASE_WINDOW + (depth * 8);
+        bool use_aspiration = (depth >= ASPIRATION_MIN_DEPTH &&
+                               best_score > -MATE_BOUND &&
+                               best_score < MATE_BOUND);
         int alpha = -INF_SCORE;
         int beta = INF_SCORE;
+        bool depth_completed = false;
+        int depth_completed_score = -INF_SCORE;
+        Move depth_completed_move = root_moves.moves[0];
 
         if (search_should_stop(&ctx)) {
             break;
@@ -1469,53 +1507,113 @@ void search_best_move(const Position* pos, const SearchLimits* limits, SearchRes
             tt_move = root_entry->best_move;
         }
 
-        sort_moves(pos, &depth_moves, tt_move, &ctx, 0, false);
+        if (use_aspiration) {
+            alpha = best_score - aspiration_window;
+            beta = best_score + aspiration_window;
 
-        for (int i = 0; i < depth_moves.count; ++i) {
-            Position next = *pos;
-            int score;
-
-            if (!engine_apply_move(&next, depth_moves.moves[i])) {
-                continue;
+            if (alpha < -INF_SCORE) {
+                alpha = -INF_SCORE;
             }
+            if (beta > INF_SCORE) {
+                beta = INF_SCORE;
+            }
+        }
 
-            if (i == 0) {
-                score = -negamax(&next, depth - 1, -beta, -alpha, 1, &ctx);
-            } else {
-                score = -negamax(&next, depth - 1, -alpha - 1, -alpha, 1, &ctx);
-                if (!ctx.stop && score > alpha) {
-                    score = -negamax(&next, depth - 1, -beta, -alpha, 1, &ctx);
+        while (true) {
+            MoveList depth_moves = root_moves;
+            int depth_best_score = -INF_SCORE;
+            Move depth_best_move = depth_moves.moves[0];
+            bool completed = false;
+            int search_alpha = alpha;
+            int search_beta = beta;
+
+            sort_moves(pos, &depth_moves, tt_move, &ctx, 0, false);
+
+            for (int i = 0; i < depth_moves.count; ++i) {
+                Position next = *pos;
+                int score;
+
+                if (!engine_apply_move(&next, depth_moves.moves[i])) {
+                    continue;
                 }
-            }
-            if (ctx.stop) {
-                break;
-            }
 
-            completed = true;
+                if (i == 0) {
+                    score = -negamax(&next, depth - 1, -search_beta, -search_alpha, 1, &ctx);
+                } else {
+                    score = -negamax(&next, depth - 1, -search_alpha - 1, -search_alpha, 1, &ctx);
+                    if (!ctx.stop && score > search_alpha && score < search_beta) {
+                        score = -negamax(&next, depth - 1, -search_beta, -search_alpha, 1, &ctx);
+                    }
+                }
+                if (ctx.stop) {
+                    break;
+                }
 
-            for (int m = 0; m < root_moves.count; ++m) {
-                if (move_same(root_moves.moves[m], depth_moves.moves[i])) {
-                    root_scores[m] = score;
+                completed = true;
+
+                for (int m = 0; m < root_moves.count; ++m) {
+                    if (move_same(root_moves.moves[m], depth_moves.moves[i])) {
+                        root_scores[m] = score;
+                        break;
+                    }
+                }
+
+                if (score > depth_best_score) {
+                    depth_best_score = score;
+                    depth_best_move = depth_moves.moves[i];
+                }
+
+                if (score > search_alpha) {
+                    search_alpha = score;
+                }
+
+                if (search_alpha >= search_beta) {
                     break;
                 }
             }
 
-            if (score > depth_best_score) {
-                depth_best_score = score;
-                depth_best_move = depth_moves.moves[i];
+            if (ctx.stop || !completed) {
+                depth_completed = false;
+                break;
             }
 
-            if (score > alpha) {
-                alpha = score;
-            }
-        }
+            depth_completed = true;
+            depth_completed_score = depth_best_score;
+            depth_completed_move = depth_best_move;
 
-        if (ctx.stop || !completed) {
+            if (!use_aspiration) {
+                break;
+            }
+
+            if (depth_best_score <= alpha || depth_best_score >= beta) {
+                aspiration_window *= 2;
+                if (aspiration_window > ASPIRATION_MAX_WINDOW) {
+                    use_aspiration = false;
+                    alpha = -INF_SCORE;
+                    beta = INF_SCORE;
+                    continue;
+                }
+
+                alpha = best_score - aspiration_window;
+                beta = best_score + aspiration_window;
+                if (alpha < -INF_SCORE) {
+                    alpha = -INF_SCORE;
+                }
+                if (beta > INF_SCORE) {
+                    beta = INF_SCORE;
+                }
+                continue;
+            }
+
             break;
         }
 
-        best_score = depth_best_score;
-        best_move = depth_best_move;
+        if (ctx.stop || !depth_completed) {
+            break;
+        }
+
+        best_score = depth_completed_score;
+        best_move = depth_completed_move;
         result.depth_reached = depth;
     }
 

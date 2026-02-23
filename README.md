@@ -14,18 +14,19 @@ Modern C11 chess application with:
 2. [Features](#features)
 3. [Requirements](#requirements)
 4. [Build and Run](#build-and-run)
-5. [One-File Packaging (Windows)](#one-file-packaging-windows)
-6. [How To Play](#how-to-play)
-7. [Online Mode](#online-mode)
-8. [AI Details](#ai-details)
-9. [Audio System](#audio-system)
-10. [Assets](#assets)
-11. [Settings and Saved Data](#settings-and-saved-data)
-12. [Architecture](#architecture)
-13. [Repository Layout](#repository-layout)
-14. [Known Limitations](#known-limitations)
-15. [Troubleshooting](#troubleshooting)
-16. [License](#license)
+5. [Engine Benchmarking](#engine-benchmarking)
+6. [One-File Packaging (Windows)](#one-file-packaging-windows)
+7. [How To Play](#how-to-play)
+8. [Online Mode](#online-mode)
+9. [AI Details](#ai-details)
+10. [Audio System](#audio-system)
+11. [Assets](#assets)
+12. [Settings and Saved Data](#settings-and-saved-data)
+13. [Architecture](#architecture)
+14. [Repository Layout](#repository-layout)
+15. [Known Limitations](#known-limitations)
+16. [Troubleshooting](#troubleshooting)
+17. [License](#license)
 
 ## Overview
 
@@ -131,12 +132,38 @@ chess_app.exe          # Windows
 |---|---:|---|
 | `CHESS_FETCH_RAYLIB` | `ON` | Auto-fetch raylib if not found locally |
 | `CHESS_ENABLE_WARNINGS` | `ON` | Enable compiler warnings (`-Wall -Wextra -Wpedantic` / `/W4`) |
+| `CHESS_BUILD_APP` | `ON` | Build GUI app target (`chess_app`) |
+| `CHESS_BUILD_ENGINE_BENCH` | `ON` | Build engine benchmark target (`chess_engine_bench`) |
+| `CHESS_ENABLE_ENGINE_TESTS` | `ON` | Register quick engine benchmark in CTest |
 | `CHESS_BUILD_LEGACY_RELAY_SERVER` | `OFF` | Build legacy optional relay server binary |
 
 Example:
 
 ```bash
 cmake -S . -B build -G Ninja -DCHESS_FETCH_RAYLIB=OFF -DCHESS_ENABLE_WARNINGS=ON
+```
+
+## Engine Benchmarking
+
+Build engine-only benchmark (no raylib/app dependency):
+
+```bash
+cmake -S . -B build-bench -G Ninja -DCHESS_BUILD_APP=OFF -DCHESS_BUILD_ENGINE_BENCH=ON
+cmake --build build-bench --target chess_engine_bench
+```
+
+Run benchmark suites:
+
+```bash
+./build-bench/chess_engine_bench --quick     # fast perft + tactical checks
+./build-bench/chess_engine_bench --perft     # full perft validation
+./build-bench/chess_engine_bench --tactics   # tactical-only checks
+```
+
+Run through CTest:
+
+```bash
+ctest --test-dir build-bench --output-on-failure
 ```
 
 ## One-File Packaging (Windows)
@@ -227,7 +254,11 @@ Search:
 - Transposition table (Zobrist hashing)
 - Move ordering (TT move, captures, promotions)
 - Built-in opening book for practical early-game play
-- Additional search heuristics (PVS/LMR/null-move + improved quiescence filtering)
+- Additional search heuristics:
+  - PVS + LMR + null-move pruning
+  - aspiration windows in iterative deepening
+  - reverse/futility-style shallow pruning + LMP controls
+  - improved quiescence filtering
 
 Difficulty model:
 

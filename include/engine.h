@@ -21,6 +21,7 @@ void engine_reset_transposition_table(void);
 /* Position lifecycle helpers. */
 void position_set_empty(Position* pos);
 void position_set_start(Position* pos);
+bool position_set_from_fen(Position* pos, const char* fen);
 void position_refresh_occupancy(Position* pos);
 uint64_t position_compute_zobrist(const Position* pos);
 

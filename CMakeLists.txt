@@ -12,68 +12,79 @@ set(CMAKE_C_EXTENSIONS OFF)
 option(CHESS_FETCH_RAYLIB "Fetch raylib automatically when not installed" ON)
 option(CHESS_ENABLE_WARNINGS "Enable common warning flags" ON)
 option(CHESS_BUILD_LEGACY_RELAY_SERVER "Build legacy standalone relay server binary" OFF)
+option(CHESS_BUILD_APP "Build GUI application target" ON)
+option(CHESS_BUILD_ENGINE_BENCH "Build engine benchmark CLI target" ON)
+option(CHESS_ENABLE_ENGINE_TESTS "Register engine bench tests in CTest" ON)
 
 find_package(Threads REQUIRED)
+
+set(CHESS_ENGINE_CORE_SOURCES
+    src/engine/bitboard.c
+    src/engine/movegen.c
+    src/engine/search.c
+)
 
 # ------------------------------------------------------------
 # Raylib dependency resolution
 # ------------------------------------------------------------
-find_package(raylib QUIET)
-if(NOT raylib_FOUND)
-    if(CHESS_FETCH_RAYLIB)
-        include(FetchContent)
-        set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-        set(BUILD_GAMES OFF CACHE BOOL "" FORCE)
+if(CHESS_BUILD_APP)
+    find_package(raylib QUIET)
+    if(NOT raylib_FOUND)
+        if(CHESS_FETCH_RAYLIB)
+            include(FetchContent)
+            set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+            set(BUILD_GAMES OFF CACHE BOOL "" FORCE)
 
-        FetchContent_Declare(
-            raylib
-            GIT_REPOSITORY https://github.com/raysan5/raylib.git
-            GIT_TAG 5.5
-        )
-        FetchContent_MakeAvailable(raylib)
-    else()
-        message(FATAL_ERROR "raylib not found. Install it or set CHESS_FETCH_RAYLIB=ON")
+            FetchContent_Declare(
+                raylib
+                GIT_REPOSITORY https://github.com/raysan5/raylib.git
+                GIT_TAG 5.5
+            )
+            FetchContent_MakeAvailable(raylib)
+        else()
+            message(FATAL_ERROR "raylib not found. Install it or set CHESS_FETCH_RAYLIB=ON")
+        endif()
     endif()
 endif()
 
 # ------------------------------------------------------------
 # Application target
 # ------------------------------------------------------------
-set(CHESS_SOURCES
-    src/main.c
-    src/core/audio.c
-    src/core/game_state.c
-    src/core/main_loop.c
-    src/engine/bitboard.c
-    src/engine/movegen.c
-    src/engine/search.c
-    src/gui/font.c
-    src/gui/renderer.c
-    src/gui/ui_widgets.c
-    src/gui/screens/menu_screen.c
-    src/gui/screens/play_screen.c
-    src/gui/screens/lobby_screen.c
-    src/gui/screens/settings_screen.c
-    src/network/client.c
-    src/network/matchmaker.c
-    src/data/secure_io.c
-)
+if(CHESS_BUILD_APP)
+    set(CHESS_SOURCES
+        src/main.c
+        src/core/audio.c
+        src/core/game_state.c
+        src/core/main_loop.c
+        ${CHESS_ENGINE_CORE_SOURCES}
+        src/gui/font.c
+        src/gui/renderer.c
+        src/gui/ui_widgets.c
+        src/gui/screens/menu_screen.c
+        src/gui/screens/play_screen.c
+        src/gui/screens/lobby_screen.c
+        src/gui/screens/settings_screen.c
+        src/network/client.c
+        src/network/matchmaker.c
+        src/data/secure_io.c
+    )
 
-add_executable(chess_app ${CHESS_SOURCES})
+    add_executable(chess_app ${CHESS_SOURCES})
 
-target_include_directories(chess_app PRIVATE include src/network)
-target_link_libraries(chess_app PRIVATE raylib Threads::Threads)
+    target_include_directories(chess_app PRIVATE include src/network)
+    target_link_libraries(chess_app PRIVATE raylib Threads::Threads)
 
-if(CHESS_ENABLE_WARNINGS)
-    if(MSVC)
-        target_compile_options(chess_app PRIVATE /W4)
-    else()
-        target_compile_options(chess_app PRIVATE -Wall -Wextra -Wpedantic)
+    if(CHESS_ENABLE_WARNINGS)
+        if(MSVC)
+            target_compile_options(chess_app PRIVATE /W4)
+        else()
+            target_compile_options(chess_app PRIVATE -Wall -Wextra -Wpedantic)
+        endif()
     endif()
 endif()
 
 # Explicit Windows system libraries for MinGW/clang toolchains.
-if(WIN32)
+if(WIN32 AND CHESS_BUILD_APP)
     # Embed icon in chess_app.exe so Explorer/Desktop shows custom file icon.
     set(CHESS_ICON_PNG "${CMAKE_SOURCE_DIR}/assets/icons/app_icon.png")
     set(CHESS_ICON_ICO "${CMAKE_BINARY_DIR}/generated/chess_app_icon.ico")
@@ -112,7 +123,7 @@ endif()
 # ------------------------------------------------------------
 # One-file portable package target (Windows self-extracting EXE)
 # ------------------------------------------------------------
-if(WIN32)
+if(WIN32 AND CHESS_BUILD_APP)
     find_program(CHESS_7Z_EXE
         NAMES 7z 7z.exe
         HINTS
@@ -134,6 +145,34 @@ if(WIN32)
         DEPENDS chess_app
         COMMENT "Building standalone one-file Chess executable"
         VERBATIM
+    )
+endif()
+
+# ------------------------------------------------------------
+# Engine benchmark target (no GUI/raylib dependency)
+# ------------------------------------------------------------
+if(CHESS_BUILD_ENGINE_BENCH)
+    add_executable(chess_engine_bench
+        tools/engine_bench.c
+        ${CHESS_ENGINE_CORE_SOURCES}
+    )
+    target_include_directories(chess_engine_bench PRIVATE include)
+    target_link_libraries(chess_engine_bench PRIVATE Threads::Threads)
+
+    if(CHESS_ENABLE_WARNINGS)
+        if(MSVC)
+            target_compile_options(chess_engine_bench PRIVATE /W4)
+        else()
+            target_compile_options(chess_engine_bench PRIVATE -Wall -Wextra -Wpedantic)
+        endif()
+    endif()
+endif()
+
+include(CTest)
+if(BUILD_TESTING AND CHESS_BUILD_ENGINE_BENCH AND CHESS_ENABLE_ENGINE_TESTS)
+    add_test(
+        NAME engine_bench_quick
+        COMMAND chess_engine_bench --quick
     )
 endif()
 
