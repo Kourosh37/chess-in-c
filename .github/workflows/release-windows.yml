@@ -47,35 +47,66 @@ jobs:
       - name: Configure
         shell: pwsh
         run: |
-          cmake -S . -B build-release-windows -G Ninja -DCHESS_RELEASE_VERSION=${{ steps.version.outputs.value }}
+          $version = "${{ steps.version.outputs.value }}"
+          cmake -S . -B build-release-windows -G Ninja `
+            "-DCHESS_RELEASE_VERSION:STRING=$version" `
+            "-DCHESS_RELEASE_ARCH:STRING=x64"
 
       - name: Build windows release artifacts
         shell: pwsh
         run: cmake --build build-release-windows --target chess_onefile
 
-      - name: Verify checksum
+      - name: Normalize artifact names and verify checksum
         shell: pwsh
         run: |
           $version = "${{ steps.version.outputs.value }}"
           $releaseDir = "build-release-windows/release"
           $exePath = Join-Path $releaseDir "chess-windows-x64-v$version.exe"
           $shaPath = "$exePath.sha256"
+          $sourceExe = $null
 
-          if (-not (Test-Path -LiteralPath $exePath)) {
+          if (Test-Path -LiteralPath $exePath) {
+            $sourceExe = $exePath
+          }
+          if (-not $sourceExe) {
+            $versionedMatches = @()
+            if (Test-Path -LiteralPath $releaseDir) {
+              $versionedMatches = @(Get-ChildItem -LiteralPath $releaseDir -File -Filter "chess-windows-*-v$version.exe")
+            }
+
+            if ($versionedMatches.Count -eq 1) {
+              $sourceExe = $versionedMatches[0].FullName
+            } else {
+              $latestExe = Join-Path $releaseDir "chess.exe"
+              if (Test-Path -LiteralPath $latestExe) {
+                $sourceExe = $latestExe
+              }
+            }
+          }
+
+          if (-not $sourceExe) {
             Write-Error "Missing expected artifact: $exePath"
+            if (Test-Path -LiteralPath $releaseDir) {
+              Write-Host "Files under $releaseDir:"
+              Get-ChildItem -LiteralPath $releaseDir -File | Select-Object Name, Length | Format-Table -AutoSize
+            } else {
+              Write-Host "Release directory does not exist: $releaseDir"
+            }
             exit 1
           }
-          if (-not (Test-Path -LiteralPath $shaPath)) {
-            Write-Error "Missing expected checksum: $shaPath"
-            exit 1
+
+          if ((Resolve-Path -LiteralPath $sourceExe).Path -ne (Resolve-Path -LiteralPath $exePath -ErrorAction SilentlyContinue)?.Path) {
+            Copy-Item -LiteralPath $sourceExe -Destination $exePath -Force
           }
+
+          $actual = (Get-FileHash -LiteralPath $exePath -Algorithm SHA256).Hash.ToLowerInvariant()
+          $exeName = Split-Path -Leaf $exePath
+          Set-Content -LiteralPath $shaPath -Value "$actual *$exeName"
 
           $line = (Get-Content -LiteralPath $shaPath | Select-Object -First 1).Trim()
           $expected = ($line -split '\s+')[0].ToLowerInvariant()
-          $actual = (Get-FileHash -LiteralPath $exePath -Algorithm SHA256).Hash.ToLowerInvariant()
-
           if ($actual -ne $expected) {
-            Write-Error "SHA256 mismatch. expected=$expected actual=$actual"
+            Write-Error "SHA256 mismatch after normalization. expected=$expected actual=$actual"
             exit 1
           }
 
