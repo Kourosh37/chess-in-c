@@ -15,6 +15,7 @@ option(CHESS_BUILD_LEGACY_RELAY_SERVER "Build legacy standalone relay server bin
 option(CHESS_BUILD_APP "Build GUI application target" ON)
 option(CHESS_BUILD_ENGINE_BENCH "Build engine benchmark CLI target" ON)
 option(CHESS_ENABLE_ENGINE_TESTS "Register engine bench tests in CTest" ON)
+option(CHESS_WINDOWS_PORTABLE_RUNTIME "Prefer static runtime linkage on Windows for portable release artifacts" ON)
 set(CHESS_RELEASE_VERSION "${PROJECT_VERSION}" CACHE STRING "Version label used for release package naming")
 set(_chess_default_release_arch "x64")
 if(CMAKE_SYSTEM_PROCESSOR)
@@ -28,6 +29,11 @@ if(CMAKE_SYSTEM_PROCESSOR)
     endif()
 endif()
 set(CHESS_RELEASE_ARCH "${_chess_default_release_arch}" CACHE STRING "Architecture label used for release package naming")
+
+if(WIN32 AND MSVC AND CHESS_WINDOWS_PORTABLE_RUNTIME)
+    # Avoid redistributable DLL requirements on end-user systems.
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>" CACHE STRING "" FORCE)
+endif()
 
 find_package(Threads REQUIRED)
 
@@ -93,6 +99,11 @@ if(CHESS_BUILD_APP)
         else()
             target_compile_options(chess_app PRIVATE -Wall -Wextra -Wpedantic)
         endif()
+    endif()
+
+    if(WIN32 AND CHESS_WINDOWS_PORTABLE_RUNTIME AND CMAKE_C_COMPILER_ID STREQUAL "GNU")
+        # Keep MinGW builds self-contained (no libgcc/libwinpthread DLL at runtime).
+        target_link_options(chess_app PRIVATE -static -static-libgcc)
     endif()
 endif()
 
@@ -197,6 +208,10 @@ if(CHESS_BUILD_ENGINE_BENCH)
         else()
             target_compile_options(chess_engine_bench PRIVATE -Wall -Wextra -Wpedantic)
         endif()
+    endif()
+
+    if(WIN32 AND CHESS_WINDOWS_PORTABLE_RUNTIME AND CMAKE_C_COMPILER_ID STREQUAL "GNU")
+        target_link_options(chess_engine_bench PRIVATE -static -static-libgcc)
     endif()
 endif()
 

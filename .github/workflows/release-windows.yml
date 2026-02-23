@@ -44,13 +44,20 @@ jobs:
         run: |
           choco install ninja 7zip -y --no-progress
 
+      - name: Setup MSVC x64 environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
       - name: Configure
         shell: pwsh
         run: |
           $version = "${{ steps.version.outputs.value }}"
           cmake -S . -B build-release-windows -G Ninja `
+            "-DCMAKE_BUILD_TYPE:STRING=Release" `
             "-DCHESS_RELEASE_VERSION:STRING=$version" `
-            "-DCHESS_RELEASE_ARCH:STRING=x64"
+            "-DCHESS_RELEASE_ARCH:STRING=x64" `
+            "-DCHESS_WINDOWS_PORTABLE_RUNTIME:BOOL=ON"
 
       - name: Build windows release artifacts
         shell: pwsh

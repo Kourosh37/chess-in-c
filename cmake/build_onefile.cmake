@@ -79,6 +79,32 @@ file(MAKE_DIRECTORY "${_stage_chess_dir}")
 file(COPY "${CHESS_APP_EXE}" DESTINATION "${_stage_chess_dir}")
 file(COPY "${CHESS_SOURCE_ASSETS}" DESTINATION "${_stage_chess_dir}")
 
+# Bundle non-system runtime DLLs when present (toolchain/runtime dependent).
+set(_stage_app_exe "${_stage_chess_dir}/${_app_name}")
+if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.21")
+    file(GET_RUNTIME_DEPENDENCIES
+        EXECUTABLES "${_stage_app_exe}"
+        RESOLVED_DEPENDENCIES_VAR _runtime_deps
+        UNRESOLVED_DEPENDENCIES_VAR _runtime_unresolved
+        PRE_EXCLUDE_REGEXES
+            "api-ms-.*"
+            "ext-ms-.*"
+        POST_EXCLUDE_REGEXES
+            ".*/Windows/System32/.*"
+            ".*/Windows/SysWOW64/.*"
+    )
+
+    foreach(_dep IN LISTS _runtime_deps)
+        if(EXISTS "${_dep}")
+            file(COPY "${_dep}" DESTINATION "${_stage_chess_dir}")
+        endif()
+    endforeach()
+
+    if(_runtime_unresolved)
+        message(STATUS "Unresolved runtime dependencies (usually system-provided): ${_runtime_unresolved}")
+    endif()
+endif()
+
 execute_process(
     COMMAND "${CHESS_7Z_EXE}" a -t7z -mx=9 -bd -y "${_payload_file}" "chess"
     WORKING_DIRECTORY "${_stage_dir}"
