@@ -10,6 +10,7 @@
 #include "engine.h"
 #include "network.h"
 #include "profile_mgr.h"
+#include "audio.h"
 
 #define ONLINE_MATCH_MAX 6
 
@@ -103,6 +104,9 @@ typedef struct ChessApp {
     float sfx_volume;
     float menu_music_volume;
     float game_music_volume;
+    bool delayed_sfx_pending;
+    AudioSfx delayed_sfx_id;
+    float delayed_sfx_timer;
 
     int last_move_from;
     int last_move_to;

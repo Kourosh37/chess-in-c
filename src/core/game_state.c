@@ -29,6 +29,7 @@ static bool g_storage_paths_ready = false;
 
 #define ONLINE_SESSIONS_MAGIC 0x43484F4EU /* CHON */
 #define ONLINE_SESSIONS_VERSION 1U
+#define CASTLE_SECOND_SFX_DELAY_SECONDS 0.11f
 
 typedef struct PersistedOnlineHeader {
     uint32_t magic;
@@ -520,6 +521,9 @@ static void sync_app_from_match(ChessApp* app, const OnlineMatch* match, bool op
     app->selected_square = -1;
     app->move_animating = false;
     app->move_anim_progress = 1.0f;
+    app->delayed_sfx_pending = false;
+    app->delayed_sfx_timer = 0.0f;
+    app->delayed_sfx_id = AUDIO_SFX_MOVE;
     app->leave_confirm_open = false;
     app->exit_confirm_open = false;
 
@@ -1368,6 +1372,9 @@ void app_online_close_match(ChessApp* app, int index, bool notify_peer) {
         app->online_local_ready = false;
         app->online_peer_ready = false;
         app->online_match_code[0] = '\0';
+        app->delayed_sfx_pending = false;
+        app->delayed_sfx_timer = 0.0f;
+        app->delayed_sfx_id = AUDIO_SFX_MOVE;
         snprintf(app->online_runtime_status,
                  sizeof(app->online_runtime_status),
                  "No active online match.");
@@ -1436,6 +1443,9 @@ void app_init(ChessApp* app) {
     app->last_move_to = -1;
     app->move_anim_duration = 0.18f;
     app->move_anim_progress = 1.0f;
+    app->delayed_sfx_pending = false;
+    app->delayed_sfx_timer = 0.0f;
+    app->delayed_sfx_id = AUDIO_SFX_MOVE;
     app_refresh_legal_moves(app);
 
     app->lobby_input[0] = '\0';
@@ -1490,6 +1500,9 @@ void app_start_game(ChessApp* app, GameMode mode) {
     app->ai_thinking = false;
     app->move_animating = false;
     app->move_anim_progress = 1.0f;
+    app->delayed_sfx_pending = false;
+    app->delayed_sfx_timer = 0.0f;
+    app->delayed_sfx_id = AUDIO_SFX_MOVE;
     app->last_move_from = -1;
     app->last_move_to = -1;
     app->leave_confirm_open = false;
@@ -1523,6 +1536,7 @@ bool app_apply_move(ChessApp* app, Move move) {
     Side moving_side = app->position.side_to_move;
     PieceType moving_piece = PIECE_NONE;
     AudioSfx move_sfx = AUDIO_SFX_MOVE;
+    bool is_castle = (move.flags & (MOVE_FLAG_KING_CASTLE | MOVE_FLAG_QUEEN_CASTLE)) != 0U;
 
     position_piece_at(&app->position, move.from, NULL, &moving_piece);
 
@@ -1549,10 +1563,18 @@ bool app_apply_move(ChessApp* app, Move move) {
     app->move_anim_piece = moving_piece;
     app->move_anim_progress = 0.0f;
 
+    app->delayed_sfx_pending = false;
+    app->delayed_sfx_timer = 0.0f;
+    app->delayed_sfx_id = AUDIO_SFX_MOVE;
+
     if ((move.flags & MOVE_FLAG_PROMOTION) != 0U) {
         move_sfx = AUDIO_SFX_PROMOTION;
-    } else if ((move.flags & (MOVE_FLAG_KING_CASTLE | MOVE_FLAG_QUEEN_CASTLE)) != 0U) {
-        move_sfx = AUDIO_SFX_CASTLE;
+    } else if (is_castle) {
+        AudioSfx castle_step_sfx = audio_is_loaded(AUDIO_SFX_MOVE) ? AUDIO_SFX_MOVE : AUDIO_SFX_CASTLE;
+        move_sfx = castle_step_sfx;
+        app->delayed_sfx_pending = true;
+        app->delayed_sfx_timer = CASTLE_SECOND_SFX_DELAY_SECONDS;
+        app->delayed_sfx_id = castle_step_sfx;
     } else if ((move.flags & MOVE_FLAG_CAPTURE) != 0U) {
         move_sfx = AUDIO_SFX_CAPTURE;
     }
@@ -1607,6 +1629,15 @@ bool app_apply_move(ChessApp* app, Move move) {
 
 /* Advances transient UI animation state. */
 void app_tick(ChessApp* app, float delta_time) {
+    if (app->delayed_sfx_pending) {
+        app->delayed_sfx_timer -= delta_time;
+        if (app->delayed_sfx_timer <= 0.0f) {
+            audio_play(app->delayed_sfx_id);
+            app->delayed_sfx_pending = false;
+            app->delayed_sfx_timer = 0.0f;
+        }
+    }
+
     if (!app->move_animating) {
         return;
     }

@@ -205,42 +205,46 @@ static void generate_king_moves(const Position* pos, Side us, MoveList* list) {
     }
 
     if (us == SIDE_WHITE) {
-        if ((pos->castling_rights & CASTLE_WHITE_KING) != 0U) {
+        if (from == 4 && (pos->castling_rights & CASTLE_WHITE_KING) != 0U) {
+            bool rook_present = (pos->pieces[SIDE_WHITE][PIECE_ROOK] & bb_square(7)) != 0ULL;
             bool empty = ((pos->all_occupied & (bb_square(5) | bb_square(6))) == 0ULL);
             bool safe = !engine_is_square_attacked(pos, 4, them) &&
                         !engine_is_square_attacked(pos, 5, them) &&
                         !engine_is_square_attacked(pos, 6, them);
-            if (empty && safe) {
+            if (rook_present && empty && safe) {
                 add_move(list, 4, 6, MOVE_FLAG_KING_CASTLE, PIECE_NONE);
             }
         }
 
-        if ((pos->castling_rights & CASTLE_WHITE_QUEEN) != 0U) {
+        if (from == 4 && (pos->castling_rights & CASTLE_WHITE_QUEEN) != 0U) {
+            bool rook_present = (pos->pieces[SIDE_WHITE][PIECE_ROOK] & bb_square(0)) != 0ULL;
             bool empty = ((pos->all_occupied & (bb_square(1) | bb_square(2) | bb_square(3))) == 0ULL);
             bool safe = !engine_is_square_attacked(pos, 4, them) &&
                         !engine_is_square_attacked(pos, 3, them) &&
                         !engine_is_square_attacked(pos, 2, them);
-            if (empty && safe) {
+            if (rook_present && empty && safe) {
                 add_move(list, 4, 2, MOVE_FLAG_QUEEN_CASTLE, PIECE_NONE);
             }
         }
     } else {
-        if ((pos->castling_rights & CASTLE_BLACK_KING) != 0U) {
+        if (from == 60 && (pos->castling_rights & CASTLE_BLACK_KING) != 0U) {
+            bool rook_present = (pos->pieces[SIDE_BLACK][PIECE_ROOK] & bb_square(63)) != 0ULL;
             bool empty = ((pos->all_occupied & (bb_square(61) | bb_square(62))) == 0ULL);
             bool safe = !engine_is_square_attacked(pos, 60, them) &&
                         !engine_is_square_attacked(pos, 61, them) &&
                         !engine_is_square_attacked(pos, 62, them);
-            if (empty && safe) {
+            if (rook_present && empty && safe) {
                 add_move(list, 60, 62, MOVE_FLAG_KING_CASTLE, PIECE_NONE);
             }
         }
 
-        if ((pos->castling_rights & CASTLE_BLACK_QUEEN) != 0U) {
+        if (from == 60 && (pos->castling_rights & CASTLE_BLACK_QUEEN) != 0U) {
+            bool rook_present = (pos->pieces[SIDE_BLACK][PIECE_ROOK] & bb_square(56)) != 0ULL;
             bool empty = ((pos->all_occupied & (bb_square(57) | bb_square(58) | bb_square(59))) == 0ULL);
             bool safe = !engine_is_square_attacked(pos, 60, them) &&
                         !engine_is_square_attacked(pos, 59, them) &&
                         !engine_is_square_attacked(pos, 58, them);
-            if (empty && safe) {
+            if (rook_present && empty && safe) {
                 add_move(list, 60, 58, MOVE_FLAG_QUEEN_CASTLE, PIECE_NONE);
             }
         }
@@ -309,7 +313,11 @@ static bool apply_move_internal(Position* pos, Move move) {
     Side them = (us == SIDE_WHITE) ? SIDE_BLACK : SIDE_WHITE;
     Side found_side;
     PieceType moved_piece;
+    bool is_castle = false;
     bool is_capture = false;
+    int castle_rook_from = -1;
+    int castle_rook_to = -1;
+    int castle_king_mid = -1;
 
     if (move.from >= BOARD_SQUARES || move.to >= BOARD_SQUARES) {
         return false;
@@ -319,7 +327,83 @@ static bool apply_move_internal(Position* pos, Move move) {
         return false;
     }
 
-    if ((move.flags & MOVE_FLAG_EN_PASSANT) != 0U) {
+    is_castle = ((move.flags & MOVE_FLAG_KING_CASTLE) != 0U) ||
+                ((move.flags & MOVE_FLAG_QUEEN_CASTLE) != 0U);
+
+    if (is_castle) {
+        bool king_side = (move.flags & MOVE_FLAG_KING_CASTLE) != 0U;
+
+        if ((move.flags & MOVE_FLAG_KING_CASTLE) != 0U &&
+            (move.flags & MOVE_FLAG_QUEEN_CASTLE) != 0U) {
+            return false;
+        }
+        if (moved_piece != PIECE_KING) {
+            return false;
+        }
+        if ((move.flags & (MOVE_FLAG_CAPTURE | MOVE_FLAG_EN_PASSANT | MOVE_FLAG_PROMOTION)) != 0U) {
+            return false;
+        }
+
+        if (us == SIDE_WHITE) {
+            if (king_side) {
+                if (move.from != 4 || move.to != 6 || (pos->castling_rights & CASTLE_WHITE_KING) == 0U) {
+                    return false;
+                }
+                castle_rook_from = 7;
+                castle_rook_to = 5;
+                castle_king_mid = 5;
+                if ((pos->all_occupied & (bb_square(5) | bb_square(6))) != 0ULL) {
+                    return false;
+                }
+            } else {
+                if (move.from != 4 || move.to != 2 || (pos->castling_rights & CASTLE_WHITE_QUEEN) == 0U) {
+                    return false;
+                }
+                castle_rook_from = 0;
+                castle_rook_to = 3;
+                castle_king_mid = 3;
+                if ((pos->all_occupied & (bb_square(1) | bb_square(2) | bb_square(3))) != 0ULL) {
+                    return false;
+                }
+            }
+        } else {
+            if (king_side) {
+                if (move.from != 60 || move.to != 62 || (pos->castling_rights & CASTLE_BLACK_KING) == 0U) {
+                    return false;
+                }
+                castle_rook_from = 63;
+                castle_rook_to = 61;
+                castle_king_mid = 61;
+                if ((pos->all_occupied & (bb_square(61) | bb_square(62))) != 0ULL) {
+                    return false;
+                }
+            } else {
+                if (move.from != 60 || move.to != 58 || (pos->castling_rights & CASTLE_BLACK_QUEEN) == 0U) {
+                    return false;
+                }
+                castle_rook_from = 56;
+                castle_rook_to = 59;
+                castle_king_mid = 59;
+                if ((pos->all_occupied & (bb_square(57) | bb_square(58) | bb_square(59))) != 0ULL) {
+                    return false;
+                }
+            }
+        }
+
+        if ((pos->pieces[us][PIECE_ROOK] & bb_square(castle_rook_from)) == 0ULL) {
+            return false;
+        }
+        if ((pos->all_occupied & bb_square(castle_rook_to)) != 0ULL) {
+            return false;
+        }
+        if (engine_is_square_attacked(pos, move.from, them) ||
+            engine_is_square_attacked(pos, castle_king_mid, them) ||
+            engine_is_square_attacked(pos, move.to, them)) {
+            return false;
+        }
+    }
+
+    if (!is_castle && (move.flags & MOVE_FLAG_EN_PASSANT) != 0U) {
         int cap_square = (us == SIDE_WHITE) ? (move.to - 8) : (move.to + 8);
         if (cap_square < 0 || cap_square >= BOARD_SQUARES) {
             return false;
@@ -327,7 +411,7 @@ static bool apply_move_internal(Position* pos, Move move) {
 
         clear_piece_at(pos, them, cap_square);
         is_capture = true;
-    } else {
+    } else if (!is_castle) {
         Side cap_side;
         PieceType cap_piece;
 
@@ -353,22 +437,9 @@ static bool apply_move_internal(Position* pos, Move move) {
         pos->pieces[us][placed_piece] |= bb_square(move.to);
     }
 
-    if ((move.flags & MOVE_FLAG_KING_CASTLE) != 0U) {
-        if (us == SIDE_WHITE) {
-            pos->pieces[SIDE_WHITE][PIECE_ROOK] &= ~bb_square(7);
-            pos->pieces[SIDE_WHITE][PIECE_ROOK] |= bb_square(5);
-        } else {
-            pos->pieces[SIDE_BLACK][PIECE_ROOK] &= ~bb_square(63);
-            pos->pieces[SIDE_BLACK][PIECE_ROOK] |= bb_square(61);
-        }
-    } else if ((move.flags & MOVE_FLAG_QUEEN_CASTLE) != 0U) {
-        if (us == SIDE_WHITE) {
-            pos->pieces[SIDE_WHITE][PIECE_ROOK] &= ~bb_square(0);
-            pos->pieces[SIDE_WHITE][PIECE_ROOK] |= bb_square(3);
-        } else {
-            pos->pieces[SIDE_BLACK][PIECE_ROOK] &= ~bb_square(56);
-            pos->pieces[SIDE_BLACK][PIECE_ROOK] |= bb_square(59);
-        }
+    if (is_castle) {
+        pos->pieces[us][PIECE_ROOK] &= ~bb_square(castle_rook_from);
+        pos->pieces[us][PIECE_ROOK] |= bb_square(castle_rook_to);
     }
 
     update_castling_rights(pos, us, moved_piece, move.from, move.to);
