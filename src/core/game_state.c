@@ -29,8 +29,8 @@ static bool g_storage_paths_ready = false;
 #define ONLINE_SESSIONS_VERSION 1U
 #define CASTLE_SECOND_SFX_DELAY_SECONDS 0.11f
 #define AI_MIN_DEPTH 2
-#define AI_MAX_DEPTH 16
-#define AI_MAX_TIME_MS 12000
+#define AI_MAX_DEPTH 18
+#define AI_MAX_TIME_MS 25000
 
 typedef struct PersistedOnlineHeader {
     uint32_t magic;
@@ -611,15 +611,15 @@ void app_set_ai_difficulty(ChessApp* app, int difficulty_percent) {
         depth = AI_MAX_DEPTH;
     }
 
-    max_time_ms = 300 + difficulty * 70;
-    if (difficulty >= 85) {
-        max_time_ms += 800;
+    max_time_ms = 450 + difficulty * 95;
+    if (difficulty >= 80) {
+        max_time_ms += 1200;
     }
-    if (difficulty >= 95) {
-        max_time_ms += 1700;
+    if (difficulty >= 90) {
+        max_time_ms += 2600;
     }
-    if (difficulty >= 100) {
-        max_time_ms += 2200;
+    if (difficulty >= 97) {
+        max_time_ms += 4200;
     }
     if (max_time_ms > AI_MAX_TIME_MS) {
         max_time_ms = AI_MAX_TIME_MS;

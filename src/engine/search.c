@@ -22,7 +22,7 @@
 
 /* Search limits and internal stack caps. */
 #define SEARCH_MIN_DEPTH 1
-#define SEARCH_MAX_DEPTH 16
+#define SEARCH_MAX_DEPTH 18
 #define MAX_SEARCH_PLY 128
 #define MAX_HISTORY_PLY 256
 #define ASPIRATION_BASE_WINDOW 35
@@ -1007,6 +1007,34 @@ static int king_safety_score(const Position* pos, Side side, int phase) {
     return score;
 }
 
+/* Penalizes tactically loose pieces (attacked and weakly defended). */
+static int piece_safety_score(const Position* pos, Side side) {
+    Side them = (side == SIDE_WHITE) ? SIDE_BLACK : SIDE_WHITE;
+    int score = 0;
+
+    for (int piece = PIECE_PAWN; piece <= PIECE_QUEEN; ++piece) {
+        Bitboard bb = pos->pieces[side][piece];
+
+        while (bb != 0ULL) {
+            int sq = pop_lsb(&bb);
+            bool attacked = engine_is_square_attacked(pos, sq, them);
+            bool defended = engine_is_square_attacked(pos, sq, side);
+
+            if (!attacked) {
+                continue;
+            }
+
+            if (!defended) {
+                score -= g_capture_values[piece] / 5;
+            } else {
+                score -= g_capture_values[piece] / 10;
+            }
+        }
+    }
+
+    return score;
+}
+
 /* Opening development incentives to improve early move choices. */
 static int opening_development_score(const Position* pos, Side side, int phase) {
     int score = 0;
@@ -1113,10 +1141,11 @@ static int evaluate_for_side(const Position* pos) {
             int pawn = pawn_structure_score(pos, (Side)side);
             int mobility = mobility_score(pos, (Side)side);
             int king = king_safety_score(pos, (Side)side, phase);
+            int safety = piece_safety_score(pos, (Side)side);
             int development = opening_development_score(pos, (Side)side, phase);
 
-            mg += sign * (pawn + mobility + king + development);
-            eg += sign * (pawn + mobility + (king / 2));
+            mg += sign * (pawn + mobility + king + safety + development);
+            eg += sign * (pawn + mobility + (king / 2) + safety);
         }
     }
 
@@ -1184,7 +1213,7 @@ static void update_cutoff_heuristics(SearchContext* ctx,
     }
 }
 
-static int quiescence(const Position* pos, int alpha, int beta, int ply, SearchContext* ctx);
+static int quiescence(const Position* pos, int alpha, int beta, int ply, int qdepth, SearchContext* ctx);
 
 /* Negamax with alpha-beta, TT, PVS, LMR, repetition and 50-move draw handling. */
 static int negamax(const Position* pos, int depth, int alpha, int beta, int ply, SearchContext* ctx) {
@@ -1228,7 +1257,7 @@ static int negamax(const Position* pos, int depth, int alpha, int beta, int ply,
     beta_orig = beta;
 
     if (depth <= 0) {
-        return quiescence(pos, alpha, beta, ply, ctx);
+        return quiescence(pos, alpha, beta, ply, 0, ctx);
     }
 
     if (ply >= MAX_SEARCH_PLY - 1) {
@@ -1271,23 +1300,23 @@ static int negamax(const Position* pos, int depth, int alpha, int beta, int ply,
 
     static_eval = evaluate_for_side(pos);
 
-    if (!in_check && depth <= 2 && static_eval + (120 * depth) <= alpha) {
-        result = quiescence(pos, alpha, beta, ply, ctx);
+    if (!in_check && depth <= 2 && static_eval + (180 * depth) <= alpha) {
+        result = quiescence(pos, alpha, beta, ply, 0, ctx);
         goto cleanup;
     }
 
-    if (!in_check && depth <= 3 && beta < MATE_BOUND) {
-        int rfp_margin = 85 * depth;
+    if (!in_check && depth <= 2 && beta < MATE_BOUND) {
+        int rfp_margin = 130 * depth;
         if (static_eval - rfp_margin >= beta) {
             result = static_eval - rfp_margin;
             goto cleanup;
         }
     }
 
-    if (depth >= 3 &&
+    if (depth >= 4 &&
         !in_check &&
         beta < MATE_BOUND &&
-        static_eval >= (beta - 40) &&
+        static_eval >= (beta + 70) &&
         side_has_non_pawn_material(pos, pos->side_to_move)) {
         Position null_pos = *pos;
         int reduction = 2 + ((depth >= 7) ? 1 : 0);
@@ -1338,9 +1367,9 @@ static int negamax(const Position* pos, int depth, int alpha, int beta, int ply,
         gives_check = engine_in_check(&next, next.side_to_move);
 
         if (!in_check && !gives_check && quiet_non_castle && i > 0) {
-            if (depth <= 3) {
-                int lmp_threshold = 4 + (depth * depth);
-                int futility_margin = 85 * depth + ((i >= 6) ? 30 : 0);
+            if (depth <= 2) {
+                int lmp_threshold = 8 + (depth * depth);
+                int futility_margin = 140 * depth + ((i >= 8) ? 50 : 0);
 
                 if (i >= lmp_threshold) {
                     continue;
@@ -1354,13 +1383,13 @@ static int negamax(const Position* pos, int depth, int alpha, int beta, int ply,
         if (!in_check &&
             !gives_check &&
             quiet_non_castle &&
-            depth >= 4 &&
-            i >= 3) {
+            depth >= 5 &&
+            i >= 4) {
             int reduction = 1;
-            if (depth >= 8) {
+            if (depth >= 9) {
                 reduction++;
             }
-            if (i >= 8) {
+            if (i >= 10) {
                 reduction++;
             }
 
@@ -1440,7 +1469,7 @@ cleanup:
 }
 
 /* Quiescence search to stabilize tactical leaf evaluations. */
-static int quiescence(const Position* pos, int alpha, int beta, int ply, SearchContext* ctx) {
+static int quiescence(const Position* pos, int alpha, int beta, int ply, int qdepth, SearchContext* ctx) {
     int result = 0;
     bool pushed = false;
     bool in_check;
@@ -1498,11 +1527,16 @@ static int quiescence(const Position* pos, int alpha, int beta, int ply, SearchC
         Move move = moves.moves[i];
         Position next = *pos;
         int score;
+        bool tactical = ((move.flags & MOVE_FLAG_CAPTURE) != 0U) ||
+                        ((move.flags & MOVE_FLAG_PROMOTION) != 0U);
 
-        if (!in_check &&
-            (move.flags & MOVE_FLAG_CAPTURE) == 0U &&
-            (move.flags & MOVE_FLAG_PROMOTION) == 0U) {
-            continue;
+        if (!in_check && !tactical) {
+            if (qdepth >= 2) {
+                continue;
+            }
+            if ((move.flags & (MOVE_FLAG_KING_CASTLE | MOVE_FLAG_QUEEN_CASTLE)) != 0U) {
+                continue;
+            }
         }
 
         if (!in_check &&
@@ -1518,7 +1552,11 @@ static int quiescence(const Position* pos, int alpha, int beta, int ply, SearchC
             continue;
         }
 
-        score = -quiescence(&next, -beta, -alpha, ply + 1, ctx);
+        if (!in_check && !tactical && !engine_in_check(&next, next.side_to_move)) {
+            continue;
+        }
+
+        score = -quiescence(&next, -beta, -alpha, ply + 1, qdepth + 1, ctx);
         if (ctx->stop) {
             result = 0;
             goto cleanup;

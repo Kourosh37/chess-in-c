@@ -264,8 +264,8 @@ Difficulty model:
 
 - User controls one value: `0..100`
 - Internally mapped to:
-  - search depth `2..16`
-  - search time budget up to `12000 ms`
+  - search depth `2..18`
+  - search time budget up to `25000 ms`
 - Randomness is forced to `0` (deterministic quality scaling)
 
 ## Audio System
