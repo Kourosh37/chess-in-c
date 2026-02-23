@@ -533,7 +533,6 @@ void app_set_ai_difficulty(ChessApp* app, int difficulty_percent) {
     int difficulty;
     int depth;
     int max_time_ms;
-    int randomness;
 
     if (app == NULL) {
         return;
@@ -542,31 +541,28 @@ void app_set_ai_difficulty(ChessApp* app, int difficulty_percent) {
     difficulty = clamp_difficulty_percent(difficulty_percent);
     app->ai_difficulty = difficulty;
 
-    depth = 1 + ((difficulty * 7 + 50) / 100);
-    if (depth < 1) {
-        depth = 1;
+    depth = 2 + ((difficulty * 10 + 50) / 100); /* 2..12 */
+    if (depth < 2) {
+        depth = 2;
     }
-    if (depth > 8) {
-        depth = 8;
+    if (depth > 12) {
+        depth = 12;
     }
 
-    max_time_ms = 300 + difficulty * 20;
+    max_time_ms = 250 + difficulty * 35;
     if (difficulty >= 90) {
-        max_time_ms += 200;
+        max_time_ms += 500;
     }
-
-    randomness = (100 - difficulty + 1) / 2;
-    randomness = (randomness / 5) * 5;
-    if (randomness < 0) {
-        randomness = 0;
+    if (difficulty >= 98) {
+        max_time_ms += 750;
     }
-    if (randomness > 50) {
-        randomness = 50;
+    if (max_time_ms > 6000) {
+        max_time_ms = 6000;
     }
 
     app->ai_limits.depth = depth;
     app->ai_limits.max_time_ms = max_time_ms;
-    app->ai_limits.randomness = randomness;
+    app->ai_limits.randomness = 0;
 }
 
 /* Parses persisted settings key/value pairs into app state. */
@@ -623,8 +619,8 @@ static void load_settings(ChessApp* app) {
             if (depth < 1) {
                 depth = 1;
             }
-            if (depth > 8) {
-                depth = 8;
+            if (depth > 12) {
+                depth = 12;
             }
             legacy_depth = depth;
         } else if (strncmp(line, "ai_randomness=", 14) == 0) {
@@ -670,8 +666,8 @@ static void load_settings(ChessApp* app) {
         if (clamped_depth < 1) {
             clamped_depth = 1;
         }
-        if (clamped_depth > 8) {
-            clamped_depth = 8;
+        if (clamped_depth > 12) {
+            clamped_depth = 12;
         }
         if (clamped_randomness < 0) {
             clamped_randomness = 0;
@@ -680,7 +676,7 @@ static void load_settings(ChessApp* app) {
             clamped_randomness = 100;
         }
 
-        depth_percent = ((clamped_depth - 1) * 100 + 3) / 7;
+        depth_percent = ((clamped_depth - 1) * 100 + 5) / 11;
         consistency_percent = 100 - clamped_randomness;
         blended = (depth_percent * 65 + consistency_percent * 35 + 50) / 100;
         app_set_ai_difficulty(app, blended);
