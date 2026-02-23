@@ -226,13 +226,15 @@ Search:
 - Negamax with alpha-beta pruning
 - Transposition table (Zobrist hashing)
 - Move ordering (TT move, captures, promotions)
+- Built-in opening book for practical early-game play
+- Additional search heuristics (PVS/LMR/null-move + improved quiescence filtering)
 
 Difficulty model:
 
 - User controls one value: `0..100`
 - Internally mapped to:
-  - search depth `2..12`
-  - search time budget up to `6000 ms`
+  - search depth `2..14`
+  - search time budget up to `9000 ms`
 - Randomness is forced to `0` (deterministic quality scaling)
 
 ## Audio System

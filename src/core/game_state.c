@@ -598,23 +598,23 @@ void app_set_ai_difficulty(ChessApp* app, int difficulty_percent) {
     difficulty = clamp_difficulty_percent(difficulty_percent);
     app->ai_difficulty = difficulty;
 
-    depth = 2 + ((difficulty * 10 + 50) / 100); /* 2..12 */
+    depth = 2 + ((difficulty * 12 + 50) / 100); /* 2..14 */
     if (depth < 2) {
         depth = 2;
     }
-    if (depth > 12) {
-        depth = 12;
+    if (depth > 14) {
+        depth = 14;
     }
 
-    max_time_ms = 250 + difficulty * 35;
+    max_time_ms = 350 + difficulty * 55;
     if (difficulty >= 90) {
-        max_time_ms += 500;
+        max_time_ms += 900;
     }
     if (difficulty >= 98) {
-        max_time_ms += 750;
+        max_time_ms += 1400;
     }
-    if (max_time_ms > 6000) {
-        max_time_ms = 6000;
+    if (max_time_ms > 9000) {
+        max_time_ms = 9000;
     }
 
     app->ai_limits.depth = depth;
@@ -684,8 +684,8 @@ static void load_settings(ChessApp* app) {
                 if (depth < 1) {
                     depth = 1;
                 }
-                if (depth > 12) {
-                    depth = 12;
+                if (depth > 14) {
+                    depth = 14;
                 }
                 legacy_depth = depth;
             } else if (strncmp(line, "ai_randomness=", 14) == 0) {
@@ -761,8 +761,8 @@ static void load_settings(ChessApp* app) {
         if (clamped_depth < 1) {
             clamped_depth = 1;
         }
-        if (clamped_depth > 12) {
-            clamped_depth = 12;
+        if (clamped_depth > 14) {
+            clamped_depth = 14;
         }
         if (clamped_randomness < 0) {
             clamped_randomness = 0;
@@ -771,7 +771,7 @@ static void load_settings(ChessApp* app) {
             clamped_randomness = 100;
         }
 
-        depth_percent = ((clamped_depth - 1) * 100 + 5) / 11;
+        depth_percent = ((clamped_depth - 1) * 100 + 6) / 13;
         consistency_percent = 100 - clamped_randomness;
         blended = (depth_percent * 65 + consistency_percent * 35 + 50) / 100;
         app_set_ai_difficulty(app, blended);
