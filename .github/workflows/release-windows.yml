@@ -1,0 +1,97 @@
+name: release-windows
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version without leading v (example: 1.1.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows-release:
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: version
+        shell: pwsh
+        run: |
+          if ("${env:GITHUB_REF_TYPE}" -eq "tag" -and "${env:GITHUB_REF_NAME}" -ne "") {
+            $releaseVersion = "${env:GITHUB_REF_NAME}" -replace '^v', ''
+          } else {
+            $releaseVersion = "${{ github.event.inputs.version }}"
+          }
+
+          if ([string]::IsNullOrWhiteSpace($releaseVersion)) {
+            Write-Error "Release version is empty."
+            exit 1
+          }
+
+          "value=$releaseVersion" >> $env:GITHUB_OUTPUT
+
+      - name: Ensure Ninja and 7-Zip
+        shell: pwsh
+        run: |
+          choco install ninja 7zip -y --no-progress
+
+      - name: Configure
+        shell: pwsh
+        run: |
+          cmake -S . -B build-release-windows -G Ninja -DCHESS_RELEASE_VERSION=${{ steps.version.outputs.value }}
+
+      - name: Build windows release artifacts
+        shell: pwsh
+        run: cmake --build build-release-windows --target chess_onefile
+
+      - name: Verify checksum
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.value }}"
+          $releaseDir = "build-release-windows/release"
+          $exePath = Join-Path $releaseDir "chess-windows-x64-v$version.exe"
+          $shaPath = "$exePath.sha256"
+
+          if (-not (Test-Path -LiteralPath $exePath)) {
+            Write-Error "Missing expected artifact: $exePath"
+            exit 1
+          }
+          if (-not (Test-Path -LiteralPath $shaPath)) {
+            Write-Error "Missing expected checksum: $shaPath"
+            exit 1
+          }
+
+          $line = (Get-Content -LiteralPath $shaPath | Select-Object -First 1).Trim()
+          $expected = ($line -split '\s+')[0].ToLowerInvariant()
+          $actual = (Get-FileHash -LiteralPath $exePath -Algorithm SHA256).Hash.ToLowerInvariant()
+
+          if ($actual -ne $expected) {
+            Write-Error "SHA256 mismatch. expected=$expected actual=$actual"
+            exit 1
+          }
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: chess-windows-release-${{ steps.version.outputs.value }}
+          path: |
+            build-release-windows/release/chess-windows-x64-v${{ steps.version.outputs.value }}.exe
+            build-release-windows/release/chess-windows-x64-v${{ steps.version.outputs.value }}.exe.sha256
+          if-no-files-found: error
+
+      - name: Attach assets to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.value }}
+          files: |
+            build-release-windows/release/chess-windows-x64-v${{ steps.version.outputs.value }}.exe
+            build-release-windows/release/chess-windows-x64-v${{ steps.version.outputs.value }}.exe.sha256

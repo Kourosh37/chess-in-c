@@ -267,6 +267,11 @@ Behavior:
 - End user does **not** need 7-Zip installed to run packaged `chess.exe`
 - 7-Zip is required only at packaging/build time
 
+GitHub automation:
+
+- workflow file: `.github/workflows/release-windows.yml`
+- pushing tag `v1.1.0` builds Windows one-file artifacts and attaches them to the same GitHub Release.
+
 ## How To Play
 
 ### General controls

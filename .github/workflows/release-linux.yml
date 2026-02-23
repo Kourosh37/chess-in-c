@@ -100,9 +100,9 @@ jobs:
           if-no-files-found: error
 
       - name: Attach assets to GitHub Release
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ steps.version.outputs.value }}
           files: |
             build-release-linux/release/chess-linux-x64-v${{ steps.version.outputs.value }}.run
             build-release-linux/release/chess-linux-x64-v${{ steps.version.outputs.value }}.run.sha256

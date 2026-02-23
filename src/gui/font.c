@@ -1,6 +1,7 @@
 #include "gui.h"
 
 #include <math.h>
+#include <stddef.h>
 
 enum {
     UI_FONT_VARIANT_COUNT = 7
