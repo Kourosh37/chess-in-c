@@ -67,6 +67,30 @@ const char* network_last_error(void) {
     return g_last_error;
 }
 
+/* Safely copies one text buffer into fixed-size destination storage. */
+static void copy_text(char* dst, size_t dst_size, const char* src) {
+    size_t len;
+
+    if (dst == NULL || dst_size == 0U) {
+        return;
+    }
+
+    if (src == NULL) {
+        dst[0] = '\0';
+        return;
+    }
+
+    len = strlen(src);
+    if (len >= dst_size) {
+        len = dst_size - 1U;
+    }
+
+    if (len > 0U) {
+        memcpy(dst, src, len);
+    }
+    dst[len] = '\0';
+}
+
 /* Initializes platform networking runtime. */
 static bool network_runtime_init(void) {
 #ifdef _WIN32
@@ -623,8 +647,7 @@ static void packet_set_sender_username(NetworkClient* client, NetPacket* packet)
     if (client == NULL || packet == NULL || client->local_username[0] == '\0') {
         return;
     }
-    strncpy(packet->username, client->local_username, PLAYER_NAME_MAX);
-    packet->username[PLAYER_NAME_MAX] = '\0';
+    copy_text(packet->username, sizeof(packet->username), client->local_username);
 }
 
 /* Finalizes handshake and switches socket into non-blocking runtime mode. */
@@ -777,14 +800,11 @@ bool network_client_host(NetworkClient* client, const char* username, char out_c
     client->rx_bytes = 0;
     client->has_pending_packet = false;
 
-    strncpy(client->local_username, username, PLAYER_NAME_MAX);
-    client->local_username[PLAYER_NAME_MAX] = '\0';
+    copy_text(client->local_username, sizeof(client->local_username), username);
     client->peer_username[0] = '\0';
-    strncpy(client->invite_code, invite_code, INVITE_CODE_LEN);
-    client->invite_code[INVITE_CODE_LEN] = '\0';
+    copy_text(client->invite_code, sizeof(client->invite_code), invite_code);
 
-    strncpy(out_code, invite_code, INVITE_CODE_LEN);
-    out_code[INVITE_CODE_LEN] = '\0';
+    copy_text(out_code, INVITE_CODE_LEN + 1U, invite_code);
     set_last_error("No error.");
     return true;
 }
@@ -849,11 +869,9 @@ bool network_client_host_reconnect(NetworkClient* client, const char* username, 
         client->host_side = SIDE_WHITE;
     }
 
-    strncpy(client->local_username, username, PLAYER_NAME_MAX);
-    client->local_username[PLAYER_NAME_MAX] = '\0';
+    copy_text(client->local_username, sizeof(client->local_username), username);
     client->peer_username[0] = '\0';
-    strncpy(client->invite_code, invite_code, INVITE_CODE_LEN);
-    client->invite_code[INVITE_CODE_LEN] = '\0';
+    copy_text(client->invite_code, sizeof(client->invite_code), invite_code);
 
     set_last_error("No error.");
     return true;
@@ -951,11 +969,9 @@ bool network_client_join(NetworkClient* client, const char* username, const char
     memset(&request, 0, sizeof(request));
     request.type = NET_MSG_JOIN_REQUEST;
     request.sequence = ++client->sequence;
-    strncpy(request.username, username, PLAYER_NAME_MAX);
-    request.username[PLAYER_NAME_MAX] = '\0';
+    copy_text(request.username, sizeof(request.username), username);
     if (local_invite_code[0] != '\0') {
-        strncpy(request.invite_code, local_invite_code, INVITE_CODE_LEN);
-        request.invite_code[INVITE_CODE_LEN] = '\0';
+        copy_text(request.invite_code, sizeof(request.invite_code), local_invite_code);
     }
 
     if (!send_packet_blocking(client, &request) || !recv_packet_blocking(client, &response)) {
@@ -995,11 +1011,9 @@ bool network_client_join(NetworkClient* client, const char* username, const char
                 memset(&request, 0, sizeof(request));
                 request.type = NET_MSG_JOIN_REQUEST;
                 request.sequence = ++client->sequence;
-                strncpy(request.username, username, PLAYER_NAME_MAX);
-                request.username[PLAYER_NAME_MAX] = '\0';
+                copy_text(request.username, sizeof(request.username), username);
                 if (local_invite_code[0] != '\0') {
-                    strncpy(request.invite_code, local_invite_code, INVITE_CODE_LEN);
-                    request.invite_code[INVITE_CODE_LEN] = '\0';
+                    copy_text(request.invite_code, sizeof(request.invite_code), local_invite_code);
                 }
 
                 if (send_packet_blocking(client, &request) && recv_packet_blocking(client, &response)) {
@@ -1028,12 +1042,9 @@ join_handshake_ok:
 
     client->connected = true;
     client->host_side = (response.flags == SIDE_BLACK) ? SIDE_WHITE : SIDE_BLACK;
-    strncpy(client->local_username, username, PLAYER_NAME_MAX);
-    client->local_username[PLAYER_NAME_MAX] = '\0';
-    strncpy(client->peer_username, response.username, PLAYER_NAME_MAX);
-    client->peer_username[PLAYER_NAME_MAX] = '\0';
-    strncpy(client->invite_code, invite_code, INVITE_CODE_LEN);
-    client->invite_code[INVITE_CODE_LEN] = '\0';
+    copy_text(client->local_username, sizeof(client->local_username), username);
+    copy_text(client->peer_username, sizeof(client->peer_username), response.username);
+    copy_text(client->invite_code, sizeof(client->invite_code), invite_code);
 
     queue_pending_packet(client, &response);
     set_last_error("No error.");
@@ -1133,8 +1144,7 @@ bool network_client_poll(NetworkClient* client, NetPacket* out_packet) {
 
             client->connected = true;
             if (packet.username[0] != '\0') {
-                strncpy(client->peer_username, packet.username, PLAYER_NAME_MAX);
-                client->peer_username[PLAYER_NAME_MAX] = '\0';
+                copy_text(client->peer_username, sizeof(client->peer_username), packet.username);
             }
 
             memset(&ack, 0, sizeof(ack));
@@ -1143,8 +1153,7 @@ bool network_client_poll(NetworkClient* client, NetPacket* out_packet) {
                             ? ((client->host_side == SIDE_WHITE) ? SIDE_BLACK : SIDE_WHITE)
                             : (uint8_t)client->host_side;
             ack.sequence = ++client->sequence;
-            strncpy(ack.invite_code, client->invite_code, INVITE_CODE_LEN);
-            ack.invite_code[INVITE_CODE_LEN] = '\0';
+            copy_text(ack.invite_code, sizeof(ack.invite_code), client->invite_code);
             packet_set_sender_username(client, &ack);
 
             if (!send_packet_runtime(client, &ack)) {
@@ -1154,12 +1163,10 @@ bool network_client_poll(NetworkClient* client, NetPacket* out_packet) {
     } else if (packet.type == NET_MSG_JOIN_ACCEPT) {
         client->connected = true;
         if (packet.username[0] != '\0') {
-            strncpy(client->peer_username, packet.username, PLAYER_NAME_MAX);
-            client->peer_username[PLAYER_NAME_MAX] = '\0';
+            copy_text(client->peer_username, sizeof(client->peer_username), packet.username);
         }
         if (packet.invite_code[0] != '\0') {
-            strncpy(client->invite_code, packet.invite_code, INVITE_CODE_LEN);
-            client->invite_code[INVITE_CODE_LEN] = '\0';
+            copy_text(client->invite_code, sizeof(client->invite_code), packet.invite_code);
         }
     } else if (packet.type == NET_MSG_LEAVE) {
         on_peer_socket_lost(client, "Peer left the match.");

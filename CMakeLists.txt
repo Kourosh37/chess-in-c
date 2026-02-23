@@ -56,7 +56,6 @@ set(CHESS_SOURCES
     src/gui/screens/settings_screen.c
     src/network/client.c
     src/network/matchmaker.c
-    src/data/profile_mgr.c
     src/data/secure_io.c
 )
 

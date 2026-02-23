@@ -480,6 +480,30 @@ static void square_to_text(int square, char out[3]) {
     out[2] = '\0';
 }
 
+/* Safely copies one text buffer into fixed-size destination storage. */
+static void copy_text(char* dst, size_t dst_size, const char* src) {
+    size_t len;
+
+    if (dst == NULL || dst_size == 0U) {
+        return;
+    }
+
+    if (src == NULL) {
+        dst[0] = '\0';
+        return;
+    }
+
+    len = strlen(src);
+    if (len >= dst_size) {
+        len = dst_size - 1U;
+    }
+
+    if (len > 0U) {
+        memcpy(dst, src, len);
+    }
+    dst[len] = '\0';
+}
+
 /* Appends one move line into per-match online history. */
 static void append_online_move_log(OnlineMatch* match, Side side, Move move) {
     char from[3];
@@ -509,8 +533,7 @@ static void append_online_move_log(OnlineMatch* match, Side side, Move move) {
         match->move_log_count = MOVE_LOG_MAX - 1;
     }
 
-    strncpy(match->move_log[match->move_log_count], line, sizeof(match->move_log[0]) - 1);
-    match->move_log[match->move_log_count][sizeof(match->move_log[0]) - 1] = '\0';
+    copy_text(match->move_log[match->move_log_count], sizeof(match->move_log[0]), line);
     match->move_log_count++;
     match->move_log_scroll = match->move_log_count;
 }

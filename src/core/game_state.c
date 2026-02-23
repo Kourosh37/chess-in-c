@@ -58,6 +58,30 @@ typedef struct PersistedOnlineMatch {
     char move_log[MOVE_LOG_MAX][64];
 } PersistedOnlineMatch;
 
+/* Safely copies one text buffer into fixed-size destination storage. */
+static void copy_text(char* dst, size_t dst_size, const char* src) {
+    size_t len;
+
+    if (dst == NULL || dst_size == 0U) {
+        return;
+    }
+
+    if (src == NULL) {
+        dst[0] = '\0';
+        return;
+    }
+
+    len = strlen(src);
+    if (len >= dst_size) {
+        len = dst_size - 1U;
+    }
+
+    if (len > 0U) {
+        memcpy(dst, src, len);
+    }
+    dst[len] = '\0';
+}
+
 /* Resolves directory of currently running executable. */
 static bool resolve_executable_dir(char out_dir[STORAGE_PATH_MAX]) {
     if (out_dir == NULL) {
@@ -86,8 +110,7 @@ static bool resolve_executable_dir(char out_dir[STORAGE_PATH_MAX]) {
         }
 
         *slash = '\0';
-        strncpy(out_dir, module_path, STORAGE_PATH_MAX - 1);
-        out_dir[STORAGE_PATH_MAX - 1] = '\0';
+        copy_text(out_dir, STORAGE_PATH_MAX, module_path);
         return out_dir[0] != '\0';
     }
 #else
@@ -101,8 +124,7 @@ static bool resolve_executable_dir(char out_dir[STORAGE_PATH_MAX]) {
             slash = strrchr(module_path, '/');
             if (slash != NULL) {
                 *slash = '\0';
-                strncpy(out_dir, module_path, STORAGE_PATH_MAX - 1);
-                out_dir[STORAGE_PATH_MAX - 1] = '\0';
+                copy_text(out_dir, STORAGE_PATH_MAX, module_path);
                 return out_dir[0] != '\0';
             }
         }
@@ -395,8 +417,7 @@ static void append_move_log_line(char logs[MOVE_LOG_MAX][64],
         *io_count = MOVE_LOG_MAX - 1;
     }
 
-    strncpy(logs[*io_count], line, sizeof(logs[0]) - 1);
-    logs[*io_count][sizeof(logs[0]) - 1] = '\0';
+    copy_text(logs[*io_count], sizeof(logs[0]), line);
     (*io_count)++;
     *io_scroll = *io_count;
 }
@@ -477,8 +498,7 @@ static void sync_match_from_app(ChessApp* app, OnlineMatch* match) {
     match->peer_ready = app->online_peer_ready;
     match->local_side = app->human_side;
 
-    strncpy(match->status, app->online_runtime_status, sizeof(match->status) - 1);
-    match->status[sizeof(match->status) - 1] = '\0';
+    copy_text(match->status, sizeof(match->status), app->online_runtime_status);
 
     match->move_log_count = app->move_log_count;
     if (match->move_log_count < 0) {
@@ -786,14 +806,12 @@ static void load_settings(ChessApp* app) {
     }
 
     if ((!has_profile_name || app->profile.username[0] == '\0') && has_online_name && app->online_name[0] != '\0') {
-        strncpy(app->profile.username, app->online_name, PLAYER_NAME_MAX);
-        app->profile.username[PLAYER_NAME_MAX] = '\0';
+        copy_text(app->profile.username, sizeof(app->profile.username), app->online_name);
         has_profile_name = true;
     }
 
     if (app->profile.username[0] == '\0') {
-        strncpy(app->profile.username, "Player", PLAYER_NAME_MAX);
-        app->profile.username[PLAYER_NAME_MAX] = '\0';
+        copy_text(app->profile.username, sizeof(app->profile.username), "Player");
     }
 }
 
@@ -1806,8 +1824,7 @@ void app_tick(ChessApp* app, float delta_time) {
                     sync_match_from_app(app, match);
                     match->in_game = false;
                     match->peer_ready = false;
-                    strncpy(match->status, app->online_runtime_status, sizeof(match->status) - 1);
-                    match->status[sizeof(match->status) - 1] = '\0';
+                    copy_text(match->status, sizeof(match->status), app->online_runtime_status);
                     save_online_sessions_internal(app);
                 }
                 app->online_match_active = false;
