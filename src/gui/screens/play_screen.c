@@ -482,7 +482,7 @@ static void draw_leave_confirm_dialog(ChessApp* app) {
     }
 
     if (online_mode) {
-        if (gui_button_submit(menu_btn, "Menu (Keep Match)", true)) {
+        if (gui_button(menu_btn, "Menu (Keep Match)")) {
             app_online_store_current_match(app);
             app->screen = SCREEN_MENU;
             app->leave_confirm_open = false;
@@ -494,7 +494,7 @@ static void draw_leave_confirm_dialog(ChessApp* app) {
                      "Match running in background. Resume any time.");
         }
 
-        if (gui_button(leave_btn, "Leave Match")) {
+        if (gui_button_submit(leave_btn, "Leave Match", true)) {
             app_online_end_match(app, true);
             app->screen = SCREEN_MENU;
             app->leave_confirm_open = false;
