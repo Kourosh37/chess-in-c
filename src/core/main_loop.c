@@ -16,6 +16,84 @@
 /* Runtime-loaded window icon path (place PNG image here). */
 #define WINDOW_ICON_PATH "assets/icons/app_icon.png"
 
+/* Builds one path string from base + relative part with safe separator handling. */
+static void compose_path(char out[1024], const char* base, const char* relative) {
+    size_t len;
+    bool has_sep;
+
+    if (out == NULL) {
+        return;
+    }
+
+    out[0] = '\0';
+    if (base == NULL || base[0] == '\0' || relative == NULL || relative[0] == '\0') {
+        return;
+    }
+
+    len = strlen(base);
+    has_sep = (len > 0U) && (base[len - 1U] == '/' || base[len - 1U] == '\\');
+    snprintf(out, 1024, "%s%s%s", base, has_sep ? "" : "/", relative);
+}
+
+/* Returns true when given directory looks like a valid chess runtime root. */
+static bool looks_like_runtime_root(const char* base_dir) {
+    char probe[1024];
+
+    if (base_dir == NULL || base_dir[0] == '\0') {
+        return false;
+    }
+
+    compose_path(probe, base_dir, "assets/icons/app_icon.png");
+    return FileExists(probe);
+}
+
+/* Chooses best runtime working directory so assets/settings work regardless of launch cwd. */
+static void normalize_working_directory(void) {
+    const char* exe_dir = GetApplicationDirectory();
+    char candidate[1024];
+    bool changed = false;
+
+    if (looks_like_runtime_root(".")) {
+        return;
+    }
+
+    if (exe_dir == NULL || exe_dir[0] == '\0') {
+        return;
+    }
+
+    if (looks_like_runtime_root(exe_dir)) {
+        changed = ChangeDirectory(exe_dir);
+    }
+
+    if (!changed) {
+        compose_path(candidate, exe_dir, "chess");
+        if (looks_like_runtime_root(candidate)) {
+            changed = ChangeDirectory(candidate);
+        }
+    }
+
+    if (!changed) {
+        compose_path(candidate, exe_dir, "..");
+        if (looks_like_runtime_root(candidate)) {
+            changed = ChangeDirectory(candidate);
+        }
+    }
+
+    if (!changed) {
+        compose_path(candidate, exe_dir, "../chess");
+        if (looks_like_runtime_root(candidate)) {
+            changed = ChangeDirectory(candidate);
+        }
+    }
+
+    if (!changed) {
+        compose_path(candidate, exe_dir, "../../chess");
+        if (looks_like_runtime_root(candidate)) {
+            (void)ChangeDirectory(candidate);
+        }
+    }
+}
+
 /* Tries to load one icon image and apply it to the window. */
 static bool try_apply_window_icon_from_path(const char* path) {
     if (path == NULL || path[0] == '\0' || !FileExists(path)) {
@@ -792,6 +870,7 @@ static void maybe_process_network(ChessApp* app) {
 /* Application main loop: events, AI/network updates, and frame rendering. */
 int run_main_loop(void) {
     ChessApp app;
+    normalize_working_directory();
     app_init(&app);
 
     AIWorker worker;
