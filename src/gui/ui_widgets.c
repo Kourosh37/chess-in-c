@@ -26,6 +26,22 @@ static InputContextMenu g_input_menu = {0};
 static char* g_selected_input_buffer = NULL;
 static float* g_active_slider_value = NULL;
 static bool g_input_box_used_this_frame = false;
+static bool g_submit_pressed_this_frame = false;
+static bool g_submit_consumed_this_frame = false;
+
+/* True while enter/numpad-enter is currently held down. */
+static bool submit_key_is_down(void) {
+    return IsKeyDown(KEY_ENTER) || IsKeyDown(KEY_KP_ENTER);
+}
+
+/* Consumes one submit press once per frame to prevent double-activation. */
+static bool submit_key_take_press(void) {
+    if (g_submit_pressed_this_frame && !g_submit_consumed_this_frame) {
+        g_submit_consumed_this_frame = true;
+        return true;
+    }
+    return false;
+}
 
 /* True when user currently has select-all state on this input buffer. */
 static bool input_has_selection(char* buffer) {
@@ -230,17 +246,19 @@ static Color brighten(Color color, int amount) {
     return color;
 }
 
-bool gui_button(Rectangle bounds, const char* label) {
+static bool gui_button_internal(Rectangle bounds, const char* label, bool submit_hotkey) {
     const GuiPalette* palette = gui_palette();
     Vector2 mouse = GetMousePosition();
     bool blocked_by_input_menu = g_input_menu.open && CheckCollisionPointRec(mouse, g_input_menu.rect);
+    bool input_menu_open = g_input_menu.open;
     bool hovered = !blocked_by_input_menu && CheckCollisionPointRec(mouse, bounds);
-    bool key_activate = hovered && (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_SPACE));
-    bool pressed = hovered && (IsMouseButtonDown(MOUSE_LEFT_BUTTON) || IsKeyDown(KEY_ENTER) || IsKeyDown(KEY_SPACE));
-    bool clicked = (hovered && IsMouseButtonReleased(MOUSE_LEFT_BUTTON)) || key_activate;
-    Color base = hovered ? palette->accent_hover : palette->accent;
-    Color fill = pressed ? brighten(base, -18) : base;
-    Color border = brighten(base, -28);
+    bool submit_activate = false;
+    bool key_activate = false;
+    bool pressed = false;
+    bool clicked = false;
+    Color base;
+    Color fill;
+    Color border;
     int font_size = (int)lroundf(bounds.height * 0.42f);
     int text_width;
     int text_h;
@@ -262,6 +280,20 @@ bool gui_button(Rectangle bounds, const char* label) {
         text_width = gui_measure_text(label, font_size);
     }
     text_h = gui_measure_text_height(font_size);
+
+    if (!input_menu_open && (hovered || submit_hotkey)) {
+        submit_activate = submit_key_take_press();
+    }
+
+    key_activate = (hovered && IsKeyPressed(KEY_SPACE)) || submit_activate;
+    pressed = hovered && (IsMouseButtonDown(MOUSE_LEFT_BUTTON) || submit_key_is_down() || IsKeyDown(KEY_SPACE));
+    if (!input_menu_open && submit_hotkey && submit_key_is_down()) {
+        pressed = true;
+    }
+    clicked = (hovered && IsMouseButtonReleased(MOUSE_LEFT_BUTTON)) || key_activate;
+    base = hovered ? palette->accent_hover : palette->accent;
+    fill = pressed ? brighten(base, -18) : base;
+    border = brighten(base, -28);
 
     if (hovered) {
         SetMouseCursor(MOUSE_CURSOR_POINTING_HAND);
@@ -285,6 +317,14 @@ bool gui_button(Rectangle bounds, const char* label) {
     }
 
     return clicked;
+}
+
+bool gui_button(Rectangle bounds, const char* label) {
+    return gui_button_internal(bounds, label, false);
+}
+
+bool gui_button_submit(Rectangle bounds, const char* label, bool submit_hotkey) {
+    return gui_button_internal(bounds, label, submit_hotkey);
 }
 
 bool gui_slider_float(Rectangle bounds, float* value, float min_value, float max_value) {
@@ -528,6 +568,8 @@ void gui_input_box(Rectangle bounds, char* buffer, int capacity, bool active) {
 
 void gui_widgets_begin_frame(void) {
     g_input_box_used_this_frame = false;
+    g_submit_pressed_this_frame = IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_KP_ENTER);
+    g_submit_consumed_this_frame = false;
 }
 
 void gui_draw_input_overlays(void) {

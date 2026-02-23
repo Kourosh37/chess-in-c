@@ -46,6 +46,7 @@ extern "C" {
 
 /* Generic widgets. */
 bool gui_button(Rectangle bounds, const char* label);
+bool gui_button_submit(Rectangle bounds, const char* label, bool submit_hotkey);
 bool gui_slider_float(Rectangle bounds, float* value, float min_value, float max_value);
 void gui_input_box(Rectangle bounds, char* buffer, int capacity, bool active);
 void gui_widgets_begin_frame(void);

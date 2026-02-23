@@ -306,7 +306,7 @@ static void draw_network_error_dialog(ChessApp* app) {
                    6,
                    palette->text_secondary);
 
-    if (gui_button(ok_btn, "OK")) {
+    if (gui_button_submit(ok_btn, "OK", true)) {
         app_clear_network_error(app);
     }
 }
@@ -634,7 +634,7 @@ void gui_screen_lobby(struct ChessApp* app) {
         }
         gui_input_box(input_box, app->lobby_input, INVITE_CODE_LEN + 1, app->lobby_input_active && !input_locked);
 
-        if (!input_locked && gui_button(join_btn, "Join")) {
+        if (!input_locked && gui_button_submit(join_btn, "Join", app->lobby_input_active)) {
             if (!matchmaker_is_valid_code(app->lobby_input)) {
                 snprintf(app->lobby_status, sizeof(app->lobby_status), "Invite code is invalid.");
             } else {

@@ -314,7 +314,7 @@ static bool draw_online_name_dialog(ChessApp* app) {
         app->online_name_error[0] = '\0';
     }
 
-    if (gui_button(save_btn, "Save")) {
+    if (gui_button_submit(save_btn, "Save", true)) {
         if (app->online_name_input[0] == '\0') {
             strncpy(app->online_name_error,
                     "Name cannot be empty.",
@@ -399,7 +399,7 @@ static void draw_exit_confirm_dialog(ChessApp* app, int active_games) {
         app->exit_confirm_open = false;
     }
 
-    if (gui_button(exit_btn, "Exit")) {
+    if (gui_button_submit(exit_btn, "Exit", true)) {
         app->exit_confirm_open = false;
         app->exit_requested = true;
     }
@@ -452,7 +452,7 @@ static void draw_network_error_dialog(ChessApp* app) {
                    6,
                    palette->text_secondary);
 
-    if (gui_button(ok_btn, "OK")) {
+    if (gui_button_submit(ok_btn, "OK", true)) {
         app_clear_network_error(app);
     }
 }

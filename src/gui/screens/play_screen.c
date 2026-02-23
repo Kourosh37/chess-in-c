@@ -482,7 +482,7 @@ static void draw_leave_confirm_dialog(ChessApp* app) {
     }
 
     if (online_mode) {
-        if (gui_button(menu_btn, "Menu (Keep Match)")) {
+        if (gui_button_submit(menu_btn, "Menu (Keep Match)", true)) {
             app_online_store_current_match(app);
             app->screen = SCREEN_MENU;
             app->leave_confirm_open = false;
@@ -503,7 +503,7 @@ static void draw_leave_confirm_dialog(ChessApp* app) {
             app->move_animating = false;
         }
     } else {
-        if (gui_button(leave_btn, "Leave")) {
+        if (gui_button_submit(leave_btn, "Leave", true)) {
             app->screen = SCREEN_MENU;
             app->leave_confirm_open = false;
             app->has_selection = false;
@@ -567,7 +567,7 @@ static void draw_online_leave_notice_dialog(ChessApp* app) {
                    4,
                    palette->text_secondary);
 
-    if (gui_button(ok_btn, "OK")) {
+    if (gui_button_submit(ok_btn, "OK", true)) {
         match_index = app->online_leave_notice_match;
         app->online_leave_notice_open = false;
         app->online_leave_notice_match = -1;
