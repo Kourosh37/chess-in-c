@@ -13,6 +13,19 @@
 
 /* Upper bound to avoid spending too much frame time draining network queue. */
 #define MAX_NET_PACKETS_PER_FRAME 16
+/* Runtime-loaded window icon path (place PNG image here). */
+#define WINDOW_ICON_PATH "assets/icons/app_icon.png"
+
+/* Loads and applies window icon from assets when file is available. */
+static void try_set_window_icon(void) {
+    if (FileExists(WINDOW_ICON_PATH)) {
+        Image icon = LoadImage(WINDOW_ICON_PATH);
+        if (icon.data != NULL) {
+            SetWindowIcon(icon);
+            UnloadImage(icon);
+        }
+    }
+}
 
 /* Background worker state used to keep AI search off the render thread. */
 typedef struct AIWorker {
@@ -135,9 +148,7 @@ static void* online_worker_thread(void* data) {
             online_worker_set_error(worker, "Internet connection is not reachable.");
         }
     } else if (worker->action == ONLINE_ASYNC_HOST_ROOM) {
-        if (!network_relay_probe()) {
-            online_worker_set_error(worker, "Internet connection is not reachable.");
-        } else if (!network_client_init(&worker->client, 0)) {
+        if (!network_client_init(&worker->client, 0)) {
             online_worker_set_error(worker, "Could not initialize network client.");
         } else if (!network_client_host(&worker->client, worker->username, worker->out_invite_code)) {
             online_worker_set_error(worker, "Could not create host room.");
@@ -147,9 +158,7 @@ static void* online_worker_thread(void* data) {
             ok = true;
         }
     } else if (worker->action == ONLINE_ASYNC_JOIN_ROOM) {
-        if (!network_relay_probe()) {
-            online_worker_set_error(worker, "Internet connection is not reachable.");
-        } else if (!network_client_init(&worker->client, 0)) {
+        if (!network_client_init(&worker->client, 0)) {
             online_worker_set_error(worker, "Could not initialize network client.");
         } else if (!network_client_join(&worker->client, worker->username, worker->invite_code)) {
             online_worker_set_error(worker, "Could not join this room.");
@@ -161,9 +170,7 @@ static void* online_worker_thread(void* data) {
             ok = true;
         }
     } else if (worker->action == ONLINE_ASYNC_RECONNECT_ROOM) {
-        if (!network_relay_probe()) {
-            online_worker_set_error(worker, "Internet connection is not reachable.");
-        } else if (!network_client_init(&worker->client, 0)) {
+        if (!network_client_init(&worker->client, 0)) {
             online_worker_set_error(worker, "Could not initialize network client.");
         } else if (worker->reconnect_is_host) {
             if (!network_client_host_reconnect(&worker->client, worker->username, worker->invite_code)) {
@@ -721,6 +728,7 @@ int run_main_loop(void) {
 
     SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT);
     InitWindow(1280, 820, "Chess");
+    try_set_window_icon();
     SetWindowMinSize(980, 680);
     SetTargetFPS(60);
     gui_font_init();

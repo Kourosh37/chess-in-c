@@ -34,9 +34,9 @@ typedef int net_socket_t;
 typedef int socklen_t;
 #endif
 
-#define CONNECT_TIMEOUT_MS 3000
-#define HANDSHAKE_TIMEOUT_MS 3000
-#define IO_TIMEOUT_MS 700
+#define CONNECT_TIMEOUT_MS 3500
+#define HANDSHAKE_TIMEOUT_MS 6000
+#define IO_TIMEOUT_MS 900
 #define HTTP_TIMEOUT_MS 2500
 
 /* External public HTTP endpoints used only to detect internet/public IP. */
@@ -862,12 +862,15 @@ bool network_client_host_reconnect(NetworkClient* client, const char* username, 
 /* Joins one host directly by invite code (no relay). */
 bool network_client_join(NetworkClient* client, const char* username, const char* invite_code) {
     uint32_t ip_be = 0U;
+    uint32_t probe_public_ip = 0U;
     uint16_t port = 0;
     struct in_addr addr;
     char host_ip[64];
     net_socket_t local_listen_fd = NET_INVALID_SOCKET;
     uint16_t local_bound_port = 0;
     uint32_t local_public_ip = 0U;
+    bool same_public_ip = false;
+    bool tried_local_first = false;
     char local_invite_code[INVITE_CODE_LEN + 1];
     NetPacket request;
     NetPacket response;
@@ -904,9 +907,36 @@ bool network_client_join(NetworkClient* client, const char* username, const char
         local_invite_code[0] = '\0';
     }
 
-    if (!tcp_connect_endpoint(&socket_fd, host_ip, port)) {
+    if (local_public_ip != 0U) {
+        same_public_ip = (local_public_ip == ip_be);
+    } else if (fetch_public_ipv4(&probe_public_ip)) {
+        same_public_ip = (probe_public_ip == ip_be);
+    }
+
+    if (same_public_ip) {
+        /*
+         * Same-machine/same-public-IP scenario: prefer localhost first to avoid
+         * NAT hairpin/loopback limitations that cause false join timeouts.
+         */
+        tried_local_first = tcp_connect_endpoint(&socket_fd, "127.0.0.1", port);
+        if (!tried_local_first && !tcp_connect_endpoint(&socket_fd, host_ip, port)) {
+            close_listen_socket(client);
+            set_last_error("Could not reach host. NAT loopback is blocked on this network. Same-router peers may require LAN/private-IP path.");
+            return false;
+        }
+    } else if (!tcp_connect_endpoint(&socket_fd, host_ip, port)) {
         close_listen_socket(client);
         set_last_error("Could not reach host. Host may be offline or blocked by NAT/firewall.");
+        return false;
+    }
+
+    if (socket_fd == NET_INVALID_SOCKET) {
+        close_listen_socket(client);
+        if (same_public_ip) {
+            set_last_error("Could not reach host. NAT loopback is blocked on this network. Same-router peers may require LAN/private-IP path.");
+        } else {
+            set_last_error("Could not reach host. Host may be offline or blocked by NAT/firewall.");
+        }
         return false;
     }
 
@@ -929,11 +959,61 @@ bool network_client_join(NetworkClient* client, const char* username, const char
     }
 
     if (!send_packet_blocking(client, &request) || !recv_packet_blocking(client, &response)) {
+        /*
+         * Rare fallback: if localhost path was tried first but handshake failed,
+         * retry once via public endpoint in case localhost port is occupied by
+         * unrelated software.
+         */
+        if (same_public_ip && tried_local_first) {
+            network_client_shutdown(client);
+            if (!network_client_init(client, 0)) {
+                set_last_error("Join handshake timed out. Could not reinitialize network client for retry.");
+                return false;
+            }
+
+            if (create_listen_socket(&local_listen_fd, 0, &local_bound_port) &&
+                fetch_public_ipv4(&local_public_ip) &&
+                matchmaker_encode_endpoint(local_public_ip, local_bound_port, local_invite_code)) {
+                client->listen_socket_handle = (intptr_t)local_listen_fd;
+            } else {
+                if (local_listen_fd != NET_INVALID_SOCKET) {
+                    socket_close(local_listen_fd);
+                }
+                client->listen_socket_handle = (intptr_t)NET_INVALID_SOCKET;
+                local_invite_code[0] = '\0';
+            }
+
+            if (tcp_connect_endpoint(&socket_fd, host_ip, port)) {
+                client->socket_handle = (intptr_t)socket_fd;
+                client->relay_connected = true;
+                client->is_host = false;
+                client->connected = false;
+                client->sequence = 0;
+                client->rx_bytes = 0;
+                client->has_pending_packet = false;
+
+                memset(&request, 0, sizeof(request));
+                request.type = NET_MSG_JOIN_REQUEST;
+                request.sequence = ++client->sequence;
+                strncpy(request.username, username, PLAYER_NAME_MAX);
+                request.username[PLAYER_NAME_MAX] = '\0';
+                if (local_invite_code[0] != '\0') {
+                    strncpy(request.invite_code, local_invite_code, INVITE_CODE_LEN);
+                    request.invite_code[INVITE_CODE_LEN] = '\0';
+                }
+
+                if (send_packet_blocking(client, &request) && recv_packet_blocking(client, &response)) {
+                    goto join_handshake_ok;
+                }
+            }
+        }
+
         network_client_shutdown(client);
-        set_last_error("Host did not accept join request.");
+        set_last_error("Join handshake timed out. Host may be offline, blocked by NAT/firewall, or not processing packets.");
         return false;
     }
 
+join_handshake_ok:
     if (response.type != NET_MSG_JOIN_ACCEPT) {
         const char* msg = (response.username[0] != '\0') ? response.username : "Join request rejected by host.";
         network_client_shutdown(client);
