@@ -22,6 +22,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup MSYS2 (MinGW64 toolchain)
+        uses: msys2/setup-msys2@v2
+        with:
+          update: true
+          install: >-
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-cmake
+
+      - name: Use MinGW64 binaries in PATH
+        shell: pwsh
+        run: |
+          "C:\msys64\mingw64\bin" >> $env:GITHUB_PATH
+
       - name: Resolve version
         id: version
         shell: pwsh
@@ -42,19 +56,18 @@ jobs:
       - name: Ensure Ninja and 7-Zip
         shell: pwsh
         run: |
-          choco install ninja 7zip -y --no-progress
-
-      - name: Setup MSVC x64 environment
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
+          choco install 7zip -y --no-progress
 
       - name: Configure
         shell: pwsh
         run: |
           $version = "${{ steps.version.outputs.value }}"
+          gcc --version
+          cmake --version
+          ninja --version
           cmake -S . -B build -G Ninja `
             "-DCMAKE_BUILD_TYPE:STRING=Release" `
+            "-DCMAKE_C_COMPILER:FILEPATH=C:/msys64/mingw64/bin/gcc.exe" `
             "-DCHESS_RELEASE_VERSION:STRING=$version" `
             "-DCHESS_RELEASE_ARCH:STRING=x64" `
             "-DCHESS_WINDOWS_PORTABLE_RUNTIME:BOOL=ON"
