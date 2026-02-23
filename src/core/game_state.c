@@ -14,13 +14,11 @@
 #endif
 
 #include "audio.h"
-#include "profile_mgr.h"
 #include "secure_io.h"
 
 /* Default legacy filenames used before secure storage migration. */
 static const char* LEGACY_SETTINGS_PATH = "settings.dat";
 static const char* LEGACY_ONLINE_SESSIONS_PATH = "online_matches.dat";
-static const char* LEGACY_PROFILE_PATH = "profile.dat";
 
 #define STORAGE_PATH_MAX 512
 static char g_settings_path[STORAGE_PATH_MAX] = "settings.dat";
@@ -252,66 +250,6 @@ static void init_storage_paths(void) {
     migrate_legacy_file(LEGACY_SETTINGS_PATH, g_settings_path);
     migrate_legacy_file(LEGACY_ONLINE_SESSIONS_PATH, g_online_sessions_path);
 
-#ifdef _WIN32
-    {
-        char local_appdata[STORAGE_PATH_MAX];
-        DWORD len = GetEnvironmentVariableA("LOCALAPPDATA", local_appdata, (DWORD)sizeof(local_appdata));
-
-        if (len > 0U && len < (DWORD)sizeof(local_appdata)) {
-            char secure_dir[STORAGE_PATH_MAX];
-            char old_settings_path[STORAGE_PATH_MAX];
-            char old_sessions_path[STORAGE_PATH_MAX];
-
-            snprintf(secure_dir, sizeof(secure_dir), "%s\\Chess\\SecureData", local_appdata);
-            snprintf(old_settings_path, sizeof(old_settings_path), "%s\\settings.dat", secure_dir);
-            snprintf(old_sessions_path, sizeof(old_sessions_path), "%s\\online_matches.dat", secure_dir);
-
-            migrate_legacy_file(old_settings_path, g_settings_path);
-            migrate_legacy_file(old_sessions_path, g_online_sessions_path);
-        }
-    }
-#endif
-}
-
-/* Loads legacy profile counters/name from old profile file locations when available. */
-static bool load_legacy_profile(Profile* out_profile) {
-    char exe_dir[STORAGE_PATH_MAX];
-    char candidate[STORAGE_PATH_MAX];
-
-    if (out_profile == NULL) {
-        return false;
-    }
-
-    if (profile_load(out_profile, LEGACY_PROFILE_PATH)) {
-        return true;
-    }
-
-    if (resolve_executable_dir(exe_dir)) {
-#ifdef _WIN32
-        snprintf(candidate, sizeof(candidate), "%s\\profile.dat", exe_dir);
-#else
-        snprintf(candidate, sizeof(candidate), "%s/profile.dat", exe_dir);
-#endif
-        if (strcmp(candidate, LEGACY_PROFILE_PATH) != 0 && profile_load(out_profile, candidate)) {
-            return true;
-        }
-    }
-
-#ifdef _WIN32
-    {
-        char local_appdata[STORAGE_PATH_MAX];
-        DWORD len = GetEnvironmentVariableA("LOCALAPPDATA", local_appdata, (DWORD)sizeof(local_appdata));
-
-        if (len > 0U && len < (DWORD)sizeof(local_appdata)) {
-            snprintf(candidate, sizeof(candidate), "%s\\Chess\\SecureData\\profile.dat", local_appdata);
-            if (profile_load(out_profile, candidate)) {
-                return true;
-            }
-        }
-    }
-#endif
-
-    return false;
 }
 
 /* Clamps AI difficulty percentage into safe 0..100 range. */
@@ -680,11 +618,8 @@ static void load_settings(ChessApp* app) {
     bool has_turn_timer_enabled = false;
     bool has_turn_time_seconds = false;
     bool has_profile_name = false;
-    bool has_profile_wins = false;
-    bool has_profile_losses = false;
     bool has_online_name = false;
     bool has_settings_payload = false;
-    bool migrated_profile_from_legacy = false;
     int parsed_turn_timer_enabled = 0;
     int parsed_turn_time_seconds = 0;
 
@@ -781,10 +716,8 @@ static void load_settings(ChessApp* app) {
                 has_profile_name = true;
             } else if (strncmp(line, "wins=", 5) == 0) {
                 app->profile.wins = (uint32_t)strtoul(line + 5, NULL, 10);
-                has_profile_wins = true;
             } else if (strncmp(line, "losses=", 7) == 0) {
                 app->profile.losses = (uint32_t)strtoul(line + 7, NULL, 10);
-                has_profile_losses = true;
             } else if (strncmp(line, "online_name=", 12) == 0) {
                 const char* value = line + 12;
                 strncpy(app->online_name, value, PLAYER_NAME_MAX);
@@ -852,29 +785,6 @@ static void load_settings(ChessApp* app) {
         }
     }
 
-    if (!has_profile_name || !has_profile_wins || !has_profile_losses) {
-        Profile legacy_profile;
-
-        if (load_legacy_profile(&legacy_profile)) {
-            if (!has_profile_name) {
-                strncpy(app->profile.username, legacy_profile.username, PLAYER_NAME_MAX);
-                app->profile.username[PLAYER_NAME_MAX] = '\0';
-                has_profile_name = true;
-                migrated_profile_from_legacy = true;
-            }
-            if (!has_profile_wins) {
-                app->profile.wins = legacy_profile.wins;
-                has_profile_wins = true;
-                migrated_profile_from_legacy = true;
-            }
-            if (!has_profile_losses) {
-                app->profile.losses = legacy_profile.losses;
-                has_profile_losses = true;
-                migrated_profile_from_legacy = true;
-            }
-        }
-    }
-
     if ((!has_profile_name || app->profile.username[0] == '\0') && has_online_name && app->online_name[0] != '\0') {
         strncpy(app->profile.username, app->online_name, PLAYER_NAME_MAX);
         app->profile.username[PLAYER_NAME_MAX] = '\0';
@@ -884,10 +794,6 @@ static void load_settings(ChessApp* app) {
     if (app->profile.username[0] == '\0') {
         strncpy(app->profile.username, "Player", PLAYER_NAME_MAX);
         app->profile.username[PLAYER_NAME_MAX] = '\0';
-    }
-
-    if (migrated_profile_from_legacy) {
-        app_save_settings(app);
     }
 }
 
