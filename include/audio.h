@@ -16,7 +16,9 @@ typedef enum AudioSfx {
     AUDIO_SFX_CHECK = 5,
     AUDIO_SFX_GAME_OVER = 6,
     AUDIO_SFX_LOBBY_JOIN = 7,
-    AUDIO_SFX_COUNT = 8
+    AUDIO_SFX_VICTORY = 8,
+    AUDIO_SFX_PIECE_SELECT = 9,
+    AUDIO_SFX_COUNT = 10
 } AudioSfx;
 
 bool audio_init(void);

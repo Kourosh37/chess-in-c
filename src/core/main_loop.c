@@ -774,7 +774,7 @@ int run_main_loop(void) {
     SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT);
     InitWindow(1280, 820, "Chess");
     try_set_window_icon();
-    SetWindowMinSize(980, 680);
+    SetWindowMinSize(920, 640);
     SetTargetFPS(60);
     gui_font_init();
     audio_init();

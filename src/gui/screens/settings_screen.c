@@ -253,8 +253,8 @@ void gui_screen_settings(struct ChessApp* app) {
     float header_h = 104.0f;
     float card_bottom_pad = 24.0f;
     float card_inner = 16.0f;
-    float row_h = 84.0f;
-    float row_gap = 12.0f;
+    float row_h = 72.0f;
+    float row_gap = 10.0f;
     float cards_h;
     float left_w;
     float right_w;
@@ -266,6 +266,8 @@ void gui_screen_settings(struct ChessApp* app) {
     Rectangle back_btn;
     Rectangle difficulty_row;
     Rectangle theme_row;
+    Rectangle touch_move_row;
+    Rectangle timer_row;
     Rectangle online_name_row;
     Rectangle toggle_btn;
     Rectangle sfx_row;
@@ -332,9 +334,21 @@ void gui_screen_settings(struct ChessApp* app) {
         left_card.width - card_inner * 2.0f,
         row_h
     };
-    online_name_row = (Rectangle){
+    touch_move_row = (Rectangle){
         left_card.x + card_inner,
         theme_row.y + row_h + row_gap,
+        left_card.width - card_inner * 2.0f,
+        row_h
+    };
+    timer_row = (Rectangle){
+        left_card.x + card_inner,
+        touch_move_row.y + row_h + row_gap,
+        left_card.width - card_inner * 2.0f,
+        row_h
+    };
+    online_name_row = (Rectangle){
+        left_card.x + card_inner,
+        timer_row.y + row_h + row_gap,
         left_card.width - card_inner * 2.0f,
         row_h
     };
@@ -342,6 +356,7 @@ void gui_screen_settings(struct ChessApp* app) {
     {
         char value[32];
         float ai_value = (float)app->ai_difficulty;
+        float timer_value = app->turn_timer_enabled ? (float)app->turn_time_seconds : 0.0f;
         int theme_count = gui_theme_count();
         float pad_x = 16.0f;
         float pad_y = 9.0f;
@@ -408,6 +423,65 @@ void gui_screen_settings(struct ChessApp* app) {
             app->theme = (ColorTheme)next;
             gui_set_active_theme(next);
             dirty = true;
+        }
+
+        {
+            Rectangle touch_btn = {
+                touch_move_row.x + touch_move_row.width - 132.0f,
+                touch_move_row.y + 10.0f,
+                116.0f,
+                touch_move_row.height - 20.0f
+            };
+            const char* touch_value = app->touch_move_enabled ? "On" : "Off";
+            int hint_size = 16;
+            int hint_y = (int)touch_move_row.y + (int)touch_move_row.height - 18;
+
+            DrawRectangleRounded(touch_move_row, 0.10f, 8, Fade(palette->panel, 0.92f));
+            DrawRectangleRoundedLinesEx(touch_move_row, 0.10f, 8, 1.0f, palette->panel_border);
+            gui_draw_text("Touch-Move Rule",
+                          (int)touch_move_row.x + 16,
+                          (int)touch_move_row.y + 10,
+                          21,
+                          palette->text_primary);
+            draw_text_fit("Selected piece must be moved.",
+                          (int)touch_move_row.x + 16,
+                          hint_y,
+                          hint_size,
+                          (int)touch_move_row.width - 164,
+                          palette->text_secondary);
+
+            if (gui_button(touch_btn, touch_value)) {
+                app->touch_move_enabled = !app->touch_move_enabled;
+                dirty = true;
+            }
+        }
+
+        {
+            char timer_text[32];
+            int rounded;
+
+            if (app->turn_timer_enabled && app->turn_time_seconds >= 10) {
+                snprintf(timer_text, sizeof(timer_text), "%ds", app->turn_time_seconds);
+            } else {
+                snprintf(timer_text, sizeof(timer_text), "Off");
+            }
+
+            if (draw_slider_row("Turn Timer", timer_text, timer_row, &timer_value, 0.0f, 300.0f)) {
+                rounded = (int)lroundf(timer_value);
+                if (rounded <= 0) {
+                    app->turn_timer_enabled = false;
+                    app->turn_time_seconds = 0;
+                    app->turn_time_remaining = 0.0f;
+                } else {
+                    if (rounded < 10) {
+                        rounded = 10;
+                    }
+                    app->turn_timer_enabled = true;
+                    app->turn_time_seconds = rounded;
+                    app->turn_time_remaining = (float)rounded;
+                }
+                dirty = true;
+            }
         }
 
         {

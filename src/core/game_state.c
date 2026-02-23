@@ -303,6 +303,61 @@ static float clamp_volume01(float value) {
     return value;
 }
 
+/* Clamps per-turn timer seconds (0 = disabled, otherwise 10..600). */
+static int clamp_turn_time_seconds(int value) {
+    if (value <= 0) {
+        return 0;
+    }
+    if (value < 10) {
+        return 10;
+    }
+    if (value > 600) {
+        return 600;
+    }
+    return value;
+}
+
+/* Resets active side clock from current timer settings. */
+static void reset_turn_clock(ChessApp* app) {
+    if (app == NULL) {
+        return;
+    }
+
+    if (app->turn_timer_enabled && app->turn_time_seconds >= 10) {
+        app->turn_time_remaining = (float)app->turn_time_seconds;
+    } else {
+        app->turn_time_remaining = 0.0f;
+    }
+}
+
+/* Plays win/lose/draw result SFX based on local player perspective. */
+static void play_match_result_sfx(const ChessApp* app, bool has_winner, Side loser) {
+    if (!has_winner) {
+        audio_play(AUDIO_SFX_GAME_OVER);
+        return;
+    }
+
+    if (app != NULL && (app->mode == MODE_SINGLE || app->mode == MODE_ONLINE)) {
+        Side winner = (loser == SIDE_WHITE) ? SIDE_BLACK : SIDE_WHITE;
+        if (winner == app->human_side) {
+            if (audio_is_loaded(AUDIO_SFX_VICTORY)) {
+                audio_play(AUDIO_SFX_VICTORY);
+            } else {
+                audio_play(AUDIO_SFX_GAME_OVER);
+            }
+        } else {
+            audio_play(AUDIO_SFX_GAME_OVER);
+        }
+        return;
+    }
+
+    if (audio_is_loaded(AUDIO_SFX_VICTORY)) {
+        audio_play(AUDIO_SFX_VICTORY);
+    } else {
+        audio_play(AUDIO_SFX_GAME_OVER);
+    }
+}
+
 /* Writes local date/time for match metadata list and sorting. */
 static void timestamp_now(char out[32], uint64_t* out_epoch) {
     time_t now = time(NULL);
@@ -521,9 +576,16 @@ static void sync_app_from_match(ChessApp* app, const OnlineMatch* match, bool op
     app->selected_square = -1;
     app->move_animating = false;
     app->move_anim_progress = 1.0f;
+    app->timeout_game_over = false;
+    app->timeout_loser = SIDE_WHITE;
     app->delayed_sfx_pending = false;
     app->delayed_sfx_timer = 0.0f;
     app->delayed_sfx_id = AUDIO_SFX_MOVE;
+    if (app->game_over) {
+        app->turn_time_remaining = 0.0f;
+    } else {
+        reset_turn_clock(app);
+    }
     app->leave_confirm_open = false;
     app->exit_confirm_open = false;
 
@@ -582,6 +644,10 @@ static void load_settings(ChessApp* app) {
     bool has_sfx_volume = false;
     bool has_menu_music_volume = false;
     bool has_game_music_volume = false;
+    bool has_turn_timer_enabled = false;
+    bool has_turn_time_seconds = false;
+    int parsed_turn_timer_enabled = 0;
+    int parsed_turn_time_seconds = 0;
 
     init_storage_paths();
 
@@ -650,6 +716,14 @@ static void load_settings(ChessApp* app) {
             has_game_music_volume = true;
         } else if (strncmp(line, "sound_volume=", 13) == 0) {
             legacy_sound_volume = clamp_volume01((float)atof(line + 13));
+        } else if (strncmp(line, "touch_move_enabled=", 19) == 0) {
+            app->touch_move_enabled = (atoi(line + 19) != 0);
+        } else if (strncmp(line, "turn_timer_enabled=", 19) == 0) {
+            has_turn_timer_enabled = true;
+            parsed_turn_timer_enabled = (atoi(line + 19) != 0) ? 1 : 0;
+        } else if (strncmp(line, "turn_time_seconds=", 18) == 0) {
+            has_turn_time_seconds = true;
+            parsed_turn_time_seconds = clamp_turn_time_seconds(atoi(line + 18));
         } else if (strncmp(line, "online_name=", 12) == 0) {
             const char* value = line + 12;
             strncpy(app->online_name, value, PLAYER_NAME_MAX);
@@ -695,6 +769,28 @@ static void load_settings(ChessApp* app) {
         }
         if (!has_game_music_volume) {
             app->game_music_volume = legacy_sound_volume;
+        }
+    }
+
+    if (has_turn_time_seconds) {
+        if (parsed_turn_time_seconds >= 10) {
+            app->turn_timer_enabled = true;
+            app->turn_time_seconds = parsed_turn_time_seconds;
+        } else {
+            app->turn_timer_enabled = false;
+            app->turn_time_seconds = 0;
+        }
+    }
+
+    if (has_turn_timer_enabled) {
+        if (parsed_turn_timer_enabled == 0) {
+            app->turn_timer_enabled = false;
+            app->turn_time_seconds = 0;
+        } else {
+            app->turn_timer_enabled = true;
+            if (app->turn_time_seconds < 10) {
+                app->turn_time_seconds = 60;
+            }
         }
     }
 }
@@ -887,6 +983,9 @@ static void set_default_profile(Profile* profile) {
 void app_refresh_legal_moves(ChessApp* app) {
     generate_legal_moves(&app->position, &app->legal_moves);
     app->game_over = (app->legal_moves.count == 0);
+    if (!app->game_over) {
+        app->timeout_game_over = false;
+    }
 }
 
 /* Returns pointer to one online match slot, or NULL when invalid. */
@@ -1372,6 +1471,9 @@ void app_online_close_match(ChessApp* app, int index, bool notify_peer) {
         app->online_local_ready = false;
         app->online_peer_ready = false;
         app->online_match_code[0] = '\0';
+        app->timeout_game_over = false;
+        app->timeout_loser = SIDE_WHITE;
+        app->turn_time_remaining = 0.0f;
         app->delayed_sfx_pending = false;
         app->delayed_sfx_timer = 0.0f;
         app->delayed_sfx_id = AUDIO_SFX_MOVE;
@@ -1420,6 +1522,12 @@ void app_init(ChessApp* app) {
     app->theme = THEME_CLASSIC;
 
     app->human_side = SIDE_WHITE;
+    app->touch_move_enabled = false;
+    app->turn_timer_enabled = false;
+    app->turn_time_seconds = 0;
+    app->turn_time_remaining = 0.0f;
+    app->timeout_game_over = false;
+    app->timeout_loser = SIDE_WHITE;
     app->ai_difficulty = 60;
     app_set_ai_difficulty(app, app->ai_difficulty);
     app->sound_enabled = true;
@@ -1447,6 +1555,7 @@ void app_init(ChessApp* app) {
     app->delayed_sfx_timer = 0.0f;
     app->delayed_sfx_id = AUDIO_SFX_MOVE;
     app_refresh_legal_moves(app);
+    reset_turn_clock(app);
 
     app->lobby_input[0] = '\0';
     app->lobby_code[0] = '\0';
@@ -1497,6 +1606,8 @@ void app_start_game(ChessApp* app, GameMode mode) {
     app->has_selection = false;
     app->selected_square = -1;
     app->game_over = false;
+    app->timeout_game_over = false;
+    app->timeout_loser = SIDE_WHITE;
     app->ai_thinking = false;
     app->move_animating = false;
     app->move_anim_progress = 1.0f;
@@ -1509,6 +1620,7 @@ void app_start_game(ChessApp* app, GameMode mode) {
     app->exit_confirm_open = false;
     app->move_log_count = 0;
     app->move_log_scroll = 0;
+    reset_turn_clock(app);
 
     if (mode == MODE_ONLINE) {
         OnlineMatch* match = app_online_get(app, app->current_online_match);
@@ -1520,6 +1632,7 @@ void app_start_game(ChessApp* app, GameMode mode) {
 
     position_set_start(&app->position);
     app_refresh_legal_moves(app);
+    reset_turn_clock(app);
 }
 
 /* Returns true when local user is expected to play the current move. */
@@ -1537,6 +1650,7 @@ bool app_apply_move(ChessApp* app, Move move) {
     PieceType moving_piece = PIECE_NONE;
     AudioSfx move_sfx = AUDIO_SFX_MOVE;
     bool is_castle = (move.flags & (MOVE_FLAG_KING_CASTLE | MOVE_FLAG_QUEEN_CASTLE)) != 0U;
+    bool in_check_after;
 
     position_piece_at(&app->position, move.from, NULL, &moving_piece);
 
@@ -1585,19 +1699,26 @@ bool app_apply_move(ChessApp* app, Move move) {
 
     app->has_selection = false;
     app->selected_square = -1;
+    app->timeout_game_over = false;
+    app->timeout_loser = SIDE_WHITE;
     app_refresh_legal_moves(app);
+    in_check_after = engine_in_check(&app->position, app->position.side_to_move);
 
-    if (engine_in_check(&app->position, app->position.side_to_move)) {
+    if (!app->game_over && in_check_after) {
         audio_play(AUDIO_SFX_CHECK);
     }
 
     if (app->game_over) {
-        audio_play(AUDIO_SFX_GAME_OVER);
+        Side loser = app->position.side_to_move;
+        play_match_result_sfx(app, in_check_after, loser);
+        app->turn_time_remaining = 0.0f;
+    } else {
+        reset_turn_clock(app);
     }
 
     if (app->game_over && app->mode == MODE_SINGLE) {
         Side loser = app->position.side_to_move;
-        bool checkmate = engine_in_check(&app->position, loser);
+        bool checkmate = in_check_after;
 
         if (checkmate) {
             Side winner = (loser == SIDE_WHITE) ? SIDE_BLACK : SIDE_WHITE;
@@ -1614,7 +1735,7 @@ bool app_apply_move(ChessApp* app, Move move) {
             if (app->game_over) {
                 match->in_game = false;
                 strncpy(match->status,
-                        engine_in_check(&app->position, app->position.side_to_move)
+                        in_check_after
                             ? "Match ended by checkmate."
                             : "Match ended by draw.",
                         sizeof(match->status) - 1);
@@ -1635,6 +1756,63 @@ void app_tick(ChessApp* app, float delta_time) {
             audio_play(app->delayed_sfx_id);
             app->delayed_sfx_pending = false;
             app->delayed_sfx_timer = 0.0f;
+        }
+    }
+
+    if (app->turn_timer_enabled &&
+        app->turn_time_seconds >= 10 &&
+        app->screen == SCREEN_PLAY &&
+        !app->game_over) {
+        app->turn_time_remaining -= delta_time;
+        if (app->turn_time_remaining <= 0.0f) {
+            Side loser = app->position.side_to_move;
+            Side winner = (loser == SIDE_WHITE) ? SIDE_BLACK : SIDE_WHITE;
+
+            app->turn_time_remaining = 0.0f;
+            app->game_over = true;
+            app->timeout_game_over = true;
+            app->timeout_loser = loser;
+            app->has_selection = false;
+            app->selected_square = -1;
+            app->move_animating = false;
+            app->move_anim_progress = 1.0f;
+            app->ai_thinking = false;
+
+            play_match_result_sfx(app, true, loser);
+
+            if (app->mode == MODE_SINGLE) {
+                profile_record_result(&app->profile, winner == app->human_side);
+                profile_save(&app->profile, g_profile_path);
+            }
+
+            if (app->mode == MODE_ONLINE) {
+                OnlineMatch* match = app_online_get(app, app->current_online_match);
+                const bool local_lost = (loser == app->human_side);
+
+                if (local_lost) {
+                    snprintf(app->online_runtime_status,
+                             sizeof(app->online_runtime_status),
+                             "Time over. You lost on time.");
+                } else {
+                    snprintf(app->online_runtime_status,
+                             sizeof(app->online_runtime_status),
+                             "Opponent ran out of time. You win.");
+                }
+
+                if (match != NULL) {
+                    if (match->network.connected) {
+                        network_client_send_leave(&match->network);
+                    }
+                    sync_match_from_app(app, match);
+                    match->in_game = false;
+                    match->peer_ready = false;
+                    strncpy(match->status, app->online_runtime_status, sizeof(match->status) - 1);
+                    match->status[sizeof(match->status) - 1] = '\0';
+                    save_online_sessions_internal(app);
+                }
+                app->online_match_active = false;
+                app->online_peer_ready = false;
+            }
         }
     }
 
@@ -1680,6 +1858,9 @@ bool app_save_settings(const ChessApp* app) {
                        sizeof(payload),
                        "theme=%d\n"
                        "ai_difficulty=%d\n"
+                       "touch_move_enabled=%d\n"
+                       "turn_timer_enabled=%d\n"
+                       "turn_time_seconds=%d\n"
                        "sound_enabled=%d\n"
                        "sfx_volume=%.3f\n"
                        "menu_music_volume=%.3f\n"
@@ -1687,6 +1868,9 @@ bool app_save_settings(const ChessApp* app) {
                        "online_name=%s\n",
                        (int)app->theme,
                        app->ai_difficulty,
+                       app->touch_move_enabled ? 1 : 0,
+                       app->turn_timer_enabled ? 1 : 0,
+                       app->turn_timer_enabled ? app->turn_time_seconds : 0,
                        app->sound_enabled ? 1 : 0,
                        app->sfx_volume,
                        app->menu_music_volume,

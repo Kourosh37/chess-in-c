@@ -55,6 +55,12 @@ typedef struct ChessApp {
     bool game_over;
     bool ai_thinking;
     Side human_side;
+    bool touch_move_enabled;
+    bool turn_timer_enabled;
+    int turn_time_seconds;
+    float turn_time_remaining;
+    bool timeout_game_over;
+    Side timeout_loser;
 
     SearchLimits ai_limits;
     int ai_difficulty;
