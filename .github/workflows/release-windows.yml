@@ -65,9 +65,9 @@ jobs:
           gcc --version
           cmake --version
           ninja --version
+          $env:CC = "gcc"
           cmake -S . -B build -G Ninja `
             "-DCMAKE_BUILD_TYPE:STRING=Release" `
-            "-DCMAKE_C_COMPILER:FILEPATH=C:/msys64/mingw64/bin/gcc.exe" `
             "-DCHESS_RELEASE_VERSION:STRING=$version" `
             "-DCHESS_RELEASE_ARCH:STRING=x64" `
             "-DCHESS_WINDOWS_PORTABLE_RUNTIME:BOOL=ON"
