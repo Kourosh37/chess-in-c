@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(ChessProject LANGUAGES C)
+project(ChessProject VERSION 1.1.0 LANGUAGES C)
 
 # ------------------------------------------------------------
 # Global toolchain settings
@@ -15,6 +15,19 @@ option(CHESS_BUILD_LEGACY_RELAY_SERVER "Build legacy standalone relay server bin
 option(CHESS_BUILD_APP "Build GUI application target" ON)
 option(CHESS_BUILD_ENGINE_BENCH "Build engine benchmark CLI target" ON)
 option(CHESS_ENABLE_ENGINE_TESTS "Register engine bench tests in CTest" ON)
+set(CHESS_RELEASE_VERSION "${PROJECT_VERSION}" CACHE STRING "Version label used for release package naming")
+set(_chess_default_release_arch "x64")
+if(CMAKE_SYSTEM_PROCESSOR)
+    string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _chess_proc_lower)
+    if(_chess_proc_lower MATCHES "^(x86_64|amd64)$")
+        set(_chess_default_release_arch "x64")
+    elseif(_chess_proc_lower MATCHES "^(aarch64|arm64)$")
+        set(_chess_default_release_arch "arm64")
+    else()
+        set(_chess_default_release_arch "${_chess_proc_lower}")
+    endif()
+endif()
+set(CHESS_RELEASE_ARCH "${_chess_default_release_arch}" CACHE STRING "Architecture label used for release package naming")
 
 find_package(Threads REQUIRED)
 
@@ -141,9 +154,28 @@ if(WIN32 AND CHESS_BUILD_APP)
             -DCHESS_SOURCE_ASSETS=${CMAKE_SOURCE_DIR}/assets
             -DCHESS_OUT_DIR=${CMAKE_BINARY_DIR}/release
             -DCHESS_7Z_EXE=${CHESS_7Z_EXE}
+            -DCHESS_RELEASE_VERSION=${CHESS_RELEASE_VERSION}
             -P ${CMAKE_SOURCE_DIR}/cmake/build_onefile.cmake
         DEPENDS chess_app
         COMMENT "Building standalone one-file Chess executable"
+        VERBATIM
+    )
+endif()
+
+# ------------------------------------------------------------
+# Linux release package target (.run + .tar.gz)
+# ------------------------------------------------------------
+if(UNIX AND NOT APPLE AND CHESS_BUILD_APP)
+    add_custom_target(chess_linux_release
+        COMMAND ${CMAKE_COMMAND}
+            -DCHESS_APP_EXE=$<TARGET_FILE:chess_app>
+            -DCHESS_SOURCE_ASSETS=${CMAKE_SOURCE_DIR}/assets
+            -DCHESS_OUT_DIR=${CMAKE_BINARY_DIR}/release
+            -DCHESS_RELEASE_VERSION=${CHESS_RELEASE_VERSION}
+            -DCHESS_RELEASE_ARCH=${CHESS_RELEASE_ARCH}
+            -P ${CMAKE_SOURCE_DIR}/cmake/build_linux_release.cmake
+        DEPENDS chess_app
+        COMMENT "Building Linux release bundles (.run + .tar.gz)"
         VERBATIM
     )
 endif()

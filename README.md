@@ -15,18 +15,19 @@ Modern C11 chess application with:
 3. [Requirements](#requirements)
 4. [Build and Run](#build-and-run)
 5. [Engine Benchmarking](#engine-benchmarking)
-6. [One-File Packaging (Windows)](#one-file-packaging-windows)
-7. [How To Play](#how-to-play)
-8. [Online Mode](#online-mode)
-9. [AI Details](#ai-details)
-10. [Audio System](#audio-system)
-11. [Assets](#assets)
-12. [Settings and Saved Data](#settings-and-saved-data)
-13. [Architecture](#architecture)
-14. [Repository Layout](#repository-layout)
-15. [Known Limitations](#known-limitations)
-16. [Troubleshooting](#troubleshooting)
-17. [License](#license)
+6. [Linux Release Packaging](#linux-release-packaging)
+7. [One-File Packaging (Windows)](#one-file-packaging-windows)
+8. [How To Play](#how-to-play)
+9. [Online Mode](#online-mode)
+10. [AI Details](#ai-details)
+11. [Audio System](#audio-system)
+12. [Assets](#assets)
+13. [Settings and Saved Data](#settings-and-saved-data)
+14. [Architecture](#architecture)
+15. [Repository Layout](#repository-layout)
+16. [Known Limitations](#known-limitations)
+17. [Troubleshooting](#troubleshooting)
+18. [License](#license)
 
 ## Overview
 
@@ -90,6 +91,10 @@ For `chess_onefile` packaging on Windows:
 
 - 7-Zip installed (`7z.exe` + `7z.sfx`)
 
+For Linux release packaging:
+
+- `tar`, `awk`, `tail` (standard Linux userland tools)
+
 ## Build and Run
 
 ### CMake + Ninja (recommended)
@@ -136,6 +141,8 @@ chess_app.exe          # Windows
 | `CHESS_BUILD_ENGINE_BENCH` | `ON` | Build engine benchmark target (`chess_engine_bench`) |
 | `CHESS_ENABLE_ENGINE_TESTS` | `ON` | Register quick engine benchmark in CTest |
 | `CHESS_BUILD_LEGACY_RELAY_SERVER` | `OFF` | Build legacy optional relay server binary |
+| `CHESS_RELEASE_VERSION` | `1.1.0` | Version label used in release package filenames |
+| `CHESS_RELEASE_ARCH` | auto | Architecture label used in release package filenames (`x64`, `arm64`, ...) |
 
 Example:
 
@@ -166,6 +173,60 @@ Run through CTest:
 ctest --test-dir build-bench --output-on-failure
 ```
 
+## Linux Release Packaging
+
+Build Linux release bundles:
+
+```bash
+cmake -S . -B build-release-linux -G Ninja -DCHESS_RELEASE_VERSION=1.1.0
+cmake --build build-release-linux --target chess_linux_release
+```
+
+or:
+
+```bash
+tools/package_linux.sh 1.1.0
+```
+
+Output:
+
+```text
+build-release-linux/release/chess-linux-x64-v1.1.0.run
+build-release-linux/release/chess-linux-x64-v1.1.0.run.sha256
+build-release-linux/release/chess-linux-x64-v1.1.0.tar.gz
+build-release-linux/release/chess-linux-x64-v1.1.0.tar.gz.sha256
+```
+
+Verification:
+
+```bash
+cd build-release-linux/release
+sha256sum -c chess-linux-x64-v1.1.0.run.sha256
+sha256sum -c chess-linux-x64-v1.1.0.tar.gz.sha256
+```
+
+Extraction behavior:
+
+- `.run` extracts to `<target>/chess` (default target: current directory)
+- `.tar.gz` also contains top-level `chess/` directory
+- extracted folder contains:
+  - `chess_app`
+  - `run.sh` (launcher helper)
+  - full `assets/`
+
+Examples:
+
+```bash
+chmod +x chess-linux-x64-v1.1.0.run
+./chess-linux-x64-v1.1.0.run
+./chess-linux-x64-v1.1.0.run /tmp
+```
+
+GitHub automation:
+
+- workflow file: `.github/workflows/release-linux.yml`
+- pushing tag `v1.1.0` builds Linux artifacts, verifies checksums, validates extracted layout, and attaches files to GitHub Release.
+
 ## One-File Packaging (Windows)
 
 Build portable self-extracting executable:
@@ -181,10 +242,20 @@ or:
 tools\package_onefile.bat
 ```
 
+Versioned package example:
+
+```bash
+cmake -S . -B build -G Ninja -DCHESS_RELEASE_VERSION=1.1.0
+cmake --build build --target chess_onefile
+```
+
 Output:
 
 ```text
+build/release/chess-windows-x64-v1.1.0.exe
+build/release/chess-windows-x64-v1.1.0.exe.sha256
 build/release/chess.exe
+build/release/chess.exe.sha256
 ```
 
 Behavior:

@@ -1,0 +1,110 @@
+name: release-linux
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version without leading v (example: 1.1.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux-release:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: version
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
+            RELEASE_VERSION="${GITHUB_REF_NAME#v}"
+          else
+            RELEASE_VERSION="${{ github.event.inputs.version }}"
+          fi
+
+          if [[ -z "$RELEASE_VERSION" ]]; then
+            echo "Release version is empty." >&2
+            exit 1
+          fi
+
+          echo "value=$RELEASE_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            ninja-build cmake build-essential \
+            libasound2-dev libgl1-mesa-dev libx11-dev \
+            libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
+            libwayland-dev libxkbcommon-dev
+
+      - name: Configure
+        shell: bash
+        run: |
+          cmake -S . -B build-release-linux -G Ninja \
+            -DCHESS_RELEASE_VERSION=${{ steps.version.outputs.value }}
+
+      - name: Build linux release artifacts
+        shell: bash
+        run: cmake --build build-release-linux --target chess_linux_release
+
+      - name: Validate extracted layout
+        shell: bash
+        run: |
+          VERSION="${{ steps.version.outputs.value }}"
+          RELEASE_DIR="build-release-linux/release"
+          RUN_FILE="${RELEASE_DIR}/chess-linux-x64-v${VERSION}.run"
+          TAR_FILE="${RELEASE_DIR}/chess-linux-x64-v${VERSION}.tar.gz"
+
+          chmod +x "$RUN_FILE"
+          rm -rf /tmp/chess-run-extract /tmp/chess-tar-extract
+          "$RUN_FILE" /tmp/chess-run-extract
+          tar -xzf "$TAR_FILE" -C /tmp/chess-tar-extract
+
+          test -x /tmp/chess-run-extract/chess/chess_app
+          test -d /tmp/chess-run-extract/chess/assets
+          test -x /tmp/chess-run-extract/chess/run.sh
+
+          test -x /tmp/chess-tar-extract/chess/chess_app
+          test -d /tmp/chess-tar-extract/chess/assets
+          test -x /tmp/chess-tar-extract/chess/run.sh
+
+      - name: Verify checksums
+        shell: bash
+        run: |
+          VERSION="${{ steps.version.outputs.value }}"
+          cd build-release-linux/release
+          sha256sum -c "chess-linux-x64-v${VERSION}.run.sha256"
+          sha256sum -c "chess-linux-x64-v${VERSION}.tar.gz.sha256"
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: chess-linux-release-${{ steps.version.outputs.value }}
+          path: |
+            build-release-linux/release/chess-linux-x64-v${{ steps.version.outputs.value }}.run
+            build-release-linux/release/chess-linux-x64-v${{ steps.version.outputs.value }}.run.sha256
+            build-release-linux/release/chess-linux-x64-v${{ steps.version.outputs.value }}.tar.gz
+            build-release-linux/release/chess-linux-x64-v${{ steps.version.outputs.value }}.tar.gz.sha256
+          if-no-files-found: error
+
+      - name: Attach assets to GitHub Release
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            build-release-linux/release/chess-linux-x64-v${{ steps.version.outputs.value }}.run
+            build-release-linux/release/chess-linux-x64-v${{ steps.version.outputs.value }}.run.sha256
+            build-release-linux/release/chess-linux-x64-v${{ steps.version.outputs.value }}.tar.gz
+            build-release-linux/release/chess-linux-x64-v${{ steps.version.outputs.value }}.tar.gz.sha256
