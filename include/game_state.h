@@ -9,7 +9,6 @@
 #include <stdbool.h>
 #include "engine.h"
 #include "network.h"
-#include "profile_mgr.h"
 #include "audio.h"
 
 #define ONLINE_MATCH_MAX 6
@@ -171,6 +170,4 @@ bool app_online_name_is_set(const ChessApp* app);
 bool app_online_save_sessions(const ChessApp* app);
 void app_show_network_error(ChessApp* app, const char* title, const char* message);
 void app_clear_network_error(ChessApp* app);
-const char* app_profile_storage_path(void);
-
 #endif

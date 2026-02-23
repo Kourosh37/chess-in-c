@@ -554,6 +554,13 @@ void gui_screen_settings(struct ChessApp* app) {
 
             gui_input_box(name_input, app->online_name, PLAYER_NAME_MAX + 1, app->online_name_input_active);
             if (strcmp(before_name, app->online_name) != 0) {
+                if (app->online_name[0] != '\0') {
+                    strncpy(app->profile.username, app->online_name, PLAYER_NAME_MAX);
+                    app->profile.username[PLAYER_NAME_MAX] = '\0';
+                } else {
+                    strncpy(app->profile.username, "Player", PLAYER_NAME_MAX);
+                    app->profile.username[PLAYER_NAME_MAX] = '\0';
+                }
                 dirty = true;
             }
 

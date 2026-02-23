@@ -14,15 +14,15 @@
 #endif
 
 #include "audio.h"
+#include "profile_mgr.h"
 #include "secure_io.h"
 
 /* Default legacy filenames used before secure storage migration. */
-static const char* LEGACY_PROFILE_PATH = "profile.dat";
 static const char* LEGACY_SETTINGS_PATH = "settings.dat";
 static const char* LEGACY_ONLINE_SESSIONS_PATH = "online_matches.dat";
+static const char* LEGACY_PROFILE_PATH = "profile.dat";
 
 #define STORAGE_PATH_MAX 512
-static char g_profile_path[STORAGE_PATH_MAX] = "profile.dat";
 static char g_settings_path[STORAGE_PATH_MAX] = "settings.dat";
 static char g_online_sessions_path[STORAGE_PATH_MAX] = "online_matches.dat";
 static bool g_storage_paths_ready = false;
@@ -126,11 +126,9 @@ static void set_storage_paths_from_dir(const char* dir) {
     }
 
 #ifdef _WIN32
-    snprintf(g_profile_path, sizeof(g_profile_path), "%s\\profile.dat", dir);
     snprintf(g_settings_path, sizeof(g_settings_path), "%s\\settings.dat", dir);
     snprintf(g_online_sessions_path, sizeof(g_online_sessions_path), "%s\\online_matches.dat", dir);
 #else
-    snprintf(g_profile_path, sizeof(g_profile_path), "%s/profile.dat", dir);
     snprintf(g_settings_path, sizeof(g_settings_path), "%s/settings.dat", dir);
     snprintf(g_online_sessions_path, sizeof(g_online_sessions_path), "%s/online_matches.dat", dir);
 #endif
@@ -240,8 +238,6 @@ static void init_storage_paths(void) {
         return;
     }
 
-    strncpy(g_profile_path, LEGACY_PROFILE_PATH, sizeof(g_profile_path) - 1);
-    g_profile_path[sizeof(g_profile_path) - 1] = '\0';
     strncpy(g_settings_path, LEGACY_SETTINGS_PATH, sizeof(g_settings_path) - 1);
     g_settings_path[sizeof(g_settings_path) - 1] = '\0';
     strncpy(g_online_sessions_path, LEGACY_ONLINE_SESSIONS_PATH, sizeof(g_online_sessions_path) - 1);
@@ -253,7 +249,6 @@ static void init_storage_paths(void) {
 
     g_storage_paths_ready = true;
 
-    migrate_legacy_file(LEGACY_PROFILE_PATH, g_profile_path);
     migrate_legacy_file(LEGACY_SETTINGS_PATH, g_settings_path);
     migrate_legacy_file(LEGACY_ONLINE_SESSIONS_PATH, g_online_sessions_path);
 
@@ -264,21 +259,59 @@ static void init_storage_paths(void) {
 
         if (len > 0U && len < (DWORD)sizeof(local_appdata)) {
             char secure_dir[STORAGE_PATH_MAX];
-            char old_profile_path[STORAGE_PATH_MAX];
             char old_settings_path[STORAGE_PATH_MAX];
             char old_sessions_path[STORAGE_PATH_MAX];
 
             snprintf(secure_dir, sizeof(secure_dir), "%s\\Chess\\SecureData", local_appdata);
-            snprintf(old_profile_path, sizeof(old_profile_path), "%s\\profile.dat", secure_dir);
             snprintf(old_settings_path, sizeof(old_settings_path), "%s\\settings.dat", secure_dir);
             snprintf(old_sessions_path, sizeof(old_sessions_path), "%s\\online_matches.dat", secure_dir);
 
-            migrate_legacy_file(old_profile_path, g_profile_path);
             migrate_legacy_file(old_settings_path, g_settings_path);
             migrate_legacy_file(old_sessions_path, g_online_sessions_path);
         }
     }
 #endif
+}
+
+/* Loads legacy profile counters/name from old profile file locations when available. */
+static bool load_legacy_profile(Profile* out_profile) {
+    char exe_dir[STORAGE_PATH_MAX];
+    char candidate[STORAGE_PATH_MAX];
+
+    if (out_profile == NULL) {
+        return false;
+    }
+
+    if (profile_load(out_profile, LEGACY_PROFILE_PATH)) {
+        return true;
+    }
+
+    if (resolve_executable_dir(exe_dir)) {
+#ifdef _WIN32
+        snprintf(candidate, sizeof(candidate), "%s\\profile.dat", exe_dir);
+#else
+        snprintf(candidate, sizeof(candidate), "%s/profile.dat", exe_dir);
+#endif
+        if (strcmp(candidate, LEGACY_PROFILE_PATH) != 0 && profile_load(out_profile, candidate)) {
+            return true;
+        }
+    }
+
+#ifdef _WIN32
+    {
+        char local_appdata[STORAGE_PATH_MAX];
+        DWORD len = GetEnvironmentVariableA("LOCALAPPDATA", local_appdata, (DWORD)sizeof(local_appdata));
+
+        if (len > 0U && len < (DWORD)sizeof(local_appdata)) {
+            snprintf(candidate, sizeof(candidate), "%s\\Chess\\SecureData\\profile.dat", local_appdata);
+            if (profile_load(out_profile, candidate)) {
+                return true;
+            }
+        }
+    }
+#endif
+
+    return false;
 }
 
 /* Clamps AI difficulty percentage into safe 0..100 range. */
@@ -646,93 +679,124 @@ static void load_settings(ChessApp* app) {
     bool has_game_music_volume = false;
     bool has_turn_timer_enabled = false;
     bool has_turn_time_seconds = false;
+    bool has_profile_name = false;
+    bool has_profile_wins = false;
+    bool has_profile_losses = false;
+    bool has_online_name = false;
+    bool has_settings_payload = false;
+    bool migrated_profile_from_legacy = false;
     int parsed_turn_timer_enabled = 0;
     int parsed_turn_time_seconds = 0;
 
     init_storage_paths();
 
-    if (!secure_io_read_file(g_settings_path, &raw_data, &raw_size)) {
-        if (!read_raw_file(LEGACY_SETTINGS_PATH, &raw_data, &raw_size)) {
+    if (secure_io_read_file(g_settings_path, &raw_data, &raw_size)) {
+        has_settings_payload = true;
+    } else if (read_raw_file(LEGACY_SETTINGS_PATH, &raw_data, &raw_size)) {
+        has_settings_payload = true;
+    }
+
+    if (has_settings_payload) {
+        text = (char*)malloc(raw_size + 1U);
+        if (text == NULL) {
+            secure_io_free(raw_data);
             return;
         }
-    }
 
-    text = (char*)malloc(raw_size + 1U);
-    if (text == NULL) {
-        secure_io_free(raw_data);
-        return;
-    }
-
-    if (raw_size > 0U && raw_data != NULL) {
-        memcpy(text, raw_data, raw_size);
-    }
-    text[raw_size] = '\0';
-    secure_io_free(raw_data);
-
-    line = strtok(text, "\r\n");
-    while (line != NULL) {
-        if (strncmp(line, "theme=", 6) == 0) {
-            int value = atoi(line + 6);
-            if (value < THEME_CLASSIC) {
-                value = THEME_CLASSIC;
-            }
-            if (value > THEME_OCEAN) {
-                value = THEME_OCEAN;
-            }
-            app->theme = (ColorTheme)value;
-        } else if (strncmp(line, "ai_difficulty=", 14) == 0) {
-            int difficulty = atoi(line + 14);
-            app_set_ai_difficulty(app, difficulty);
-            has_ai_difficulty = true;
-        } else if (strncmp(line, "ai_depth=", 9) == 0) {
-            int depth = atoi(line + 9);
-            if (depth < 1) {
-                depth = 1;
-            }
-            if (depth > 12) {
-                depth = 12;
-            }
-            legacy_depth = depth;
-        } else if (strncmp(line, "ai_randomness=", 14) == 0) {
-            int randomness = atoi(line + 14);
-            if (randomness < 0) {
-                randomness = 0;
-            }
-            if (randomness > 100) {
-                randomness = 100;
-            }
-            legacy_randomness = randomness;
-        } else if (strncmp(line, "sound_enabled=", 14) == 0) {
-            int enabled = atoi(line + 14);
-            app->sound_enabled = (enabled != 0);
-        } else if (strncmp(line, "sfx_volume=", 11) == 0) {
-            app->sfx_volume = clamp_volume01((float)atof(line + 11));
-            has_sfx_volume = true;
-        } else if (strncmp(line, "menu_music_volume=", 18) == 0) {
-            app->menu_music_volume = clamp_volume01((float)atof(line + 18));
-            has_menu_music_volume = true;
-        } else if (strncmp(line, "game_music_volume=", 18) == 0) {
-            app->game_music_volume = clamp_volume01((float)atof(line + 18));
-            has_game_music_volume = true;
-        } else if (strncmp(line, "sound_volume=", 13) == 0) {
-            legacy_sound_volume = clamp_volume01((float)atof(line + 13));
-        } else if (strncmp(line, "touch_move_enabled=", 19) == 0) {
-            app->touch_move_enabled = (atoi(line + 19) != 0);
-        } else if (strncmp(line, "turn_timer_enabled=", 19) == 0) {
-            has_turn_timer_enabled = true;
-            parsed_turn_timer_enabled = (atoi(line + 19) != 0) ? 1 : 0;
-        } else if (strncmp(line, "turn_time_seconds=", 18) == 0) {
-            has_turn_time_seconds = true;
-            parsed_turn_time_seconds = clamp_turn_time_seconds(atoi(line + 18));
-        } else if (strncmp(line, "online_name=", 12) == 0) {
-            const char* value = line + 12;
-            strncpy(app->online_name, value, PLAYER_NAME_MAX);
-            app->online_name[PLAYER_NAME_MAX] = '\0';
+        if (raw_size > 0U && raw_data != NULL) {
+            memcpy(text, raw_data, raw_size);
         }
-        line = strtok(NULL, "\r\n");
-    }
+        text[raw_size] = '\0';
+        secure_io_free(raw_data);
 
-    free(text);
+        line = strtok(text, "\r\n");
+        while (line != NULL) {
+            if (strncmp(line, "theme=", 6) == 0) {
+                int value = atoi(line + 6);
+                if (value < THEME_CLASSIC) {
+                    value = THEME_CLASSIC;
+                }
+                if (value > THEME_OCEAN) {
+                    value = THEME_OCEAN;
+                }
+                app->theme = (ColorTheme)value;
+            } else if (strncmp(line, "ai_difficulty=", 14) == 0) {
+                int difficulty = atoi(line + 14);
+                app_set_ai_difficulty(app, difficulty);
+                has_ai_difficulty = true;
+            } else if (strncmp(line, "ai_depth=", 9) == 0) {
+                int depth = atoi(line + 9);
+                if (depth < 1) {
+                    depth = 1;
+                }
+                if (depth > 12) {
+                    depth = 12;
+                }
+                legacy_depth = depth;
+            } else if (strncmp(line, "ai_randomness=", 14) == 0) {
+                int randomness = atoi(line + 14);
+                if (randomness < 0) {
+                    randomness = 0;
+                }
+                if (randomness > 100) {
+                    randomness = 100;
+                }
+                legacy_randomness = randomness;
+            } else if (strncmp(line, "sound_enabled=", 14) == 0) {
+                int enabled = atoi(line + 14);
+                app->sound_enabled = (enabled != 0);
+            } else if (strncmp(line, "sfx_volume=", 11) == 0) {
+                app->sfx_volume = clamp_volume01((float)atof(line + 11));
+                has_sfx_volume = true;
+            } else if (strncmp(line, "menu_music_volume=", 18) == 0) {
+                app->menu_music_volume = clamp_volume01((float)atof(line + 18));
+                has_menu_music_volume = true;
+            } else if (strncmp(line, "game_music_volume=", 18) == 0) {
+                app->game_music_volume = clamp_volume01((float)atof(line + 18));
+                has_game_music_volume = true;
+            } else if (strncmp(line, "sound_volume=", 13) == 0) {
+                legacy_sound_volume = clamp_volume01((float)atof(line + 13));
+            } else if (strncmp(line, "touch_move_enabled=", 19) == 0) {
+                app->touch_move_enabled = (atoi(line + 19) != 0);
+            } else if (strncmp(line, "turn_timer_enabled=", 19) == 0) {
+                has_turn_timer_enabled = true;
+                parsed_turn_timer_enabled = (atoi(line + 19) != 0) ? 1 : 0;
+            } else if (strncmp(line, "turn_time_seconds=", 18) == 0) {
+                has_turn_time_seconds = true;
+                parsed_turn_time_seconds = clamp_turn_time_seconds(atoi(line + 18));
+            } else if (strncmp(line, "player_name=", 12) == 0) {
+                const char* value = line + 12;
+                strncpy(app->profile.username, value, PLAYER_NAME_MAX);
+                app->profile.username[PLAYER_NAME_MAX] = '\0';
+                has_profile_name = true;
+            } else if (strncmp(line, "profile_username=", 17) == 0) {
+                const char* value = line + 17;
+                strncpy(app->profile.username, value, PLAYER_NAME_MAX);
+                app->profile.username[PLAYER_NAME_MAX] = '\0';
+                has_profile_name = true;
+            } else if (strncmp(line, "username=", 9) == 0) {
+                const char* value = line + 9;
+                strncpy(app->profile.username, value, PLAYER_NAME_MAX);
+                app->profile.username[PLAYER_NAME_MAX] = '\0';
+                has_profile_name = true;
+            } else if (strncmp(line, "wins=", 5) == 0) {
+                app->profile.wins = (uint32_t)strtoul(line + 5, NULL, 10);
+                has_profile_wins = true;
+            } else if (strncmp(line, "losses=", 7) == 0) {
+                app->profile.losses = (uint32_t)strtoul(line + 7, NULL, 10);
+                has_profile_losses = true;
+            } else if (strncmp(line, "online_name=", 12) == 0) {
+                const char* value = line + 12;
+                strncpy(app->online_name, value, PLAYER_NAME_MAX);
+                app->online_name[PLAYER_NAME_MAX] = '\0';
+                has_online_name = true;
+            }
+
+            line = strtok(NULL, "\r\n");
+        }
+
+        free(text);
+    }
 
     if (!has_ai_difficulty && (legacy_depth >= 0 || legacy_randomness >= 0)) {
         int depth_percent;
@@ -786,6 +850,44 @@ static void load_settings(ChessApp* app) {
                 app->turn_time_seconds = 60;
             }
         }
+    }
+
+    if (!has_profile_name || !has_profile_wins || !has_profile_losses) {
+        Profile legacy_profile;
+
+        if (load_legacy_profile(&legacy_profile)) {
+            if (!has_profile_name) {
+                strncpy(app->profile.username, legacy_profile.username, PLAYER_NAME_MAX);
+                app->profile.username[PLAYER_NAME_MAX] = '\0';
+                has_profile_name = true;
+                migrated_profile_from_legacy = true;
+            }
+            if (!has_profile_wins) {
+                app->profile.wins = legacy_profile.wins;
+                has_profile_wins = true;
+                migrated_profile_from_legacy = true;
+            }
+            if (!has_profile_losses) {
+                app->profile.losses = legacy_profile.losses;
+                has_profile_losses = true;
+                migrated_profile_from_legacy = true;
+            }
+        }
+    }
+
+    if ((!has_profile_name || app->profile.username[0] == '\0') && has_online_name && app->online_name[0] != '\0') {
+        strncpy(app->profile.username, app->online_name, PLAYER_NAME_MAX);
+        app->profile.username[PLAYER_NAME_MAX] = '\0';
+        has_profile_name = true;
+    }
+
+    if (app->profile.username[0] == '\0') {
+        strncpy(app->profile.username, "Player", PLAYER_NAME_MAX);
+        app->profile.username[PLAYER_NAME_MAX] = '\0';
+    }
+
+    if (migrated_profile_from_legacy) {
+        app_save_settings(app);
     }
 }
 
@@ -1053,12 +1155,6 @@ void app_clear_network_error(ChessApp* app) {
     app->network_error_popup_open = false;
     app->network_error_popup_title[0] = '\0';
     app->network_error_popup_text[0] = '\0';
-}
-
-/* Exposes resolved encrypted profile storage path for shutdown save flow. */
-const char* app_profile_storage_path(void) {
-    init_storage_paths();
-    return g_profile_path;
 }
 
 /* Saves current on-screen online match board/log into persistent slot. */
@@ -1530,14 +1626,10 @@ void app_init(ChessApp* app) {
     app->game_music_volume = 0.55f;
     app->online_name[0] = '\0';
     app->online_name_input[0] = '\0';
+    set_default_profile(&app->profile);
 
     init_storage_paths();
     load_settings(app);
-
-    set_default_profile(&app->profile);
-    if (!profile_load(&app->profile, g_profile_path)) {
-        profile_save(&app->profile, g_profile_path);
-    }
 
     position_set_start(&app->position);
     app->selected_square = -1;
@@ -1716,10 +1808,14 @@ bool app_apply_move(ChessApp* app, Move move) {
 
         if (checkmate) {
             Side winner = (loser == SIDE_WHITE) ? SIDE_BLACK : SIDE_WHITE;
-            profile_record_result(&app->profile, winner == app->human_side);
+            if (winner == app->human_side) {
+                app->profile.wins++;
+            } else {
+                app->profile.losses++;
+            }
         }
 
-        profile_save(&app->profile, g_profile_path);
+        app_save_settings(app);
     }
 
     if (app->mode == MODE_ONLINE) {
@@ -1775,8 +1871,12 @@ void app_tick(ChessApp* app, float delta_time) {
             play_match_result_sfx(app, true, loser);
 
             if (app->mode == MODE_SINGLE) {
-                profile_record_result(&app->profile, winner == app->human_side);
-                profile_save(&app->profile, g_profile_path);
+                if (winner == app->human_side) {
+                    app->profile.wins++;
+                } else {
+                    app->profile.losses++;
+                }
+                app_save_settings(app);
             }
 
             if (app->mode == MODE_ONLINE) {
@@ -1841,12 +1941,21 @@ void app_online_end_match(ChessApp* app, bool notify_peer) {
 bool app_save_settings(const ChessApp* app) {
     char payload[1024];
     int written;
+    const char* player_name;
 
     if (app == NULL) {
         return false;
     }
 
     init_storage_paths();
+
+    if (app->online_name[0] != '\0') {
+        player_name = app->online_name;
+    } else if (app->profile.username[0] != '\0') {
+        player_name = app->profile.username;
+    } else {
+        player_name = "Player";
+    }
 
     written = snprintf(payload,
                        sizeof(payload),
@@ -1855,21 +1964,27 @@ bool app_save_settings(const ChessApp* app) {
                        "touch_move_enabled=%d\n"
                        "turn_timer_enabled=%d\n"
                        "turn_time_seconds=%d\n"
-                       "sound_enabled=%d\n"
-                       "sfx_volume=%.3f\n"
-                       "menu_music_volume=%.3f\n"
-                       "game_music_volume=%.3f\n"
-                       "online_name=%s\n",
-                       (int)app->theme,
-                       app->ai_difficulty,
+                        "sound_enabled=%d\n"
+                        "sfx_volume=%.3f\n"
+                        "menu_music_volume=%.3f\n"
+                        "game_music_volume=%.3f\n"
+                        "player_name=%s\n"
+                        "wins=%u\n"
+                        "losses=%u\n"
+                        "online_name=%s\n",
+                        (int)app->theme,
+                        app->ai_difficulty,
                        app->touch_move_enabled ? 1 : 0,
                        app->turn_timer_enabled ? 1 : 0,
                        app->turn_timer_enabled ? app->turn_time_seconds : 0,
-                       app->sound_enabled ? 1 : 0,
-                       app->sfx_volume,
-                       app->menu_music_volume,
-                       app->game_music_volume,
-                       app->online_name);
+                        app->sound_enabled ? 1 : 0,
+                        app->sfx_volume,
+                        app->menu_music_volume,
+                        app->game_music_volume,
+                        player_name,
+                        app->profile.wins,
+                        app->profile.losses,
+                        app->online_name);
     if (written < 0 || (size_t)written >= sizeof(payload)) {
         return false;
     }

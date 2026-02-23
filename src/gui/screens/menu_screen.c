@@ -323,6 +323,8 @@ static bool draw_online_name_dialog(ChessApp* app) {
         } else {
             strncpy(app->online_name, app->online_name_input, PLAYER_NAME_MAX);
             app->online_name[PLAYER_NAME_MAX] = '\0';
+            strncpy(app->profile.username, app->online_name, PLAYER_NAME_MAX);
+            app->profile.username[PLAYER_NAME_MAX] = '\0';
             app_save_settings(app);
             app->online_name_dialog_open = false;
             app->online_name_input_active = false;
