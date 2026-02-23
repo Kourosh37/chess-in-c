@@ -281,12 +281,12 @@ static bool gui_button_internal(Rectangle bounds, const char* label, bool submit
     }
     text_h = gui_measure_text_height(font_size);
 
-    if (!input_menu_open && (hovered || submit_hotkey)) {
+    if (!input_menu_open && submit_hotkey) {
         submit_activate = submit_key_take_press();
     }
 
     key_activate = (hovered && IsKeyPressed(KEY_SPACE)) || submit_activate;
-    pressed = hovered && (IsMouseButtonDown(MOUSE_LEFT_BUTTON) || submit_key_is_down() || IsKeyDown(KEY_SPACE));
+    pressed = hovered && (IsMouseButtonDown(MOUSE_LEFT_BUTTON) || IsKeyDown(KEY_SPACE));
     if (!input_menu_open && submit_hotkey && submit_key_is_down()) {
         pressed = true;
     }
