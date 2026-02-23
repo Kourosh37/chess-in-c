@@ -59,6 +59,10 @@ jobs:
         shell: bash
         run: cmake --build build-release-linux --target chess_linux_release
 
+      - name: Ensure executable exists
+        shell: bash
+        run: test -x build-release-linux/chess_app
+
       - name: Validate extracted layout
         shell: bash
         run: |
