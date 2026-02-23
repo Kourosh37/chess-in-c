@@ -2,6 +2,9 @@
 
 #include <stdlib.h>
 #include <string.h>
+#ifdef _MSC_VER
+#include <intrin.h>
+#endif
 
 #ifdef _WIN32
 #include <windows.h>
@@ -10,7 +13,7 @@
 #endif
 
 /* Transposition-table size (must be power-of-two for mask indexing). */
-#define TT_SIZE (1U << 20)
+#define TT_SIZE (1U << 21)
 
 /* Search score sentinels. */
 #define INF_SCORE 300000
@@ -19,7 +22,7 @@
 
 /* Search limits and internal stack caps. */
 #define SEARCH_MIN_DEPTH 1
-#define SEARCH_MAX_DEPTH 14
+#define SEARCH_MAX_DEPTH 16
 #define MAX_SEARCH_PLY 128
 #define MAX_HISTORY_PLY 256
 #define ASPIRATION_BASE_WINDOW 35
@@ -33,8 +36,8 @@
 #define CASTLE_BLACK_QUEEN 0x08
 
 /* Built-in opening book limits. */
-#define OPENING_BOOK_MAX_ENTRIES 1024
-#define OPENING_BOOK_MAX_CANDIDATES 64
+#define OPENING_BOOK_MAX_ENTRIES 2048
+#define OPENING_BOOK_MAX_CANDIDATES 96
 
 typedef enum TTFlag {
     TT_FLAG_EXACT = 0,
@@ -47,6 +50,7 @@ typedef struct TTEntry {
     uint64_t key;
     int depth;
     int score;
+    uint8_t generation;
     uint8_t flag;
     Move best_move;
 } TTEntry;
@@ -57,6 +61,7 @@ typedef struct SearchContext {
     uint64_t start_ms;
     uint64_t nodes;
     bool stop;
+    uint8_t generation;
 
     uint64_t path_keys[MAX_HISTORY_PLY];
     int path_len;
@@ -80,6 +85,7 @@ static TTEntry g_tt[TT_SIZE];
 static OpeningBookEntry g_opening_book[OPENING_BOOK_MAX_ENTRIES];
 static int g_opening_book_count = 0;
 static bool g_opening_book_ready = false;
+static uint8_t g_tt_generation = 1;
 
 /* Capture ordering values (king remains very high for MVV/LVA ranking). */
 static const int g_capture_values[6] = {100, 320, 330, 500, 900, 20000};
@@ -254,29 +260,70 @@ static const OpeningBookSeed g_opening_book_seeds[] = {
     {"e2e4 g7g6 d2d4 f8g7 b1c3 d7d6 g1f3", 46},
     {"e2e4 c7c5 g1f3 e7e6 d2d4 c5d4 f3d4 b8c6 b1c3 d7d6", 72},
     {"e2e4 c7c5 g1f3 d7d6 d2d4 c5d4 f3d4 g8f6 b1c3 e7e6", 69},
-    {"d2d4 g8f6 c2c4 e7e6 g1f3 d7d5 b1c3 f8e7 c1g5 e8g8", 73}
+    {"d2d4 g8f6 c2c4 e7e6 g1f3 d7d5 b1c3 f8e7 c1g5 e8g8", 73},
+    {"e2e4 e7e5 g1f3 b8c6 f1b5 a7a6 b5a4 g8f6 e1g1 f8e7 f1e1 b7b5 a4b3 d7d6 c2c3 e8g8", 85},
+    {"e2e4 e7e5 g1f3 b8c6 f1c4 f8c5 b2b4 c5b4 c2c3 b4a5 d2d4", 62},
+    {"e2e4 e7e5 g1f3 b8c6 f1c4 g8f6 d2d3 f8c5 c2c3 d7d6 e1g1 e8g8", 67},
+    {"e2e4 e7e5 g1f3 b8c6 d2d4 e5d4 f3d4 g8f6 b1c3 f8b4", 58},
+    {"e2e4 e7e5 g1f3 g8f6 f3e5 d7d6 e5f3 f6e4 d2d4 d6d5", 54},
+    {"e2e4 c7c5 g1f3 d7d6 d2d4 c5d4 f3d4 g8f6 b1c3 a7a6 c1e3 e7e5 d4b3 c8e6", 88},
+    {"e2e4 c7c5 g1f3 d7d6 d2d4 c5d4 f3d4 g8f6 b1c3 g7g6 c1e3 f8g7 f2f3", 76},
+    {"e2e4 c7c5 g1f3 d7d6 d2d4 c5d4 f3d4 b8c6 b1c3 g8f6", 64},
+    {"e2e4 e7e6 d2d4 d7d5 b1d2 c7c5 e4d5 e6d5 g1f3 b8c6", 61},
+    {"e2e4 e7e6 d2d4 d7d5 e4d5 e6d5 g1f3 c7c5", 47},
+    {"e2e4 c7c6 d2d4 d7d5 b1c3 d5e4 c3e4 c8f5 e4g3 f5g6", 74},
+    {"e2e4 c7c6 d2d4 d7d5 e4e5 c8f5 g1f3 e7e6 f1e2 c6c5", 59},
+    {"d2d4 d7d5 c2c4 e7e6 c4d5 e6d5 b1c3 g8f6 c1g5", 65},
+    {"d2d4 d7d5 c2c4 e7e6 b1c3 g8f6 c1g5 f8e7 e2e3 h7h6 g5h4", 72},
+    {"d2d4 d7d5 c2c4 c7c6 g1f3 g8f6 b1c3 d5c4 a2a4 c8f5", 69},
+    {"d2d4 g8f6 c2c4 e7e6 b1c3 f8b4 e2e3 c7c5 g1f3 b8c6", 71},
+    {"d2d4 g8f6 c2c4 g7g6 b1c3 f8g7 e2e4 d7d6 g1f3 e8g8 f1e2 e7e5", 83},
+    {"d2d4 g8f6 c2c4 g7g6 b1c3 d7d5 c4d5 f6d5 e2e4 d5c3 b2c3", 63},
+    {"c2c4 e7e5 b1c3 g8f6 g2g3 d7d5 c4d5 f6d5 f1g2 d5c3", 52},
+    {"c2c4 e7e5 g2g3 g8f6 f1g2 d7d5 c4d5 f6d5 b1c3", 49},
+    {"g1f3 d7d5 c2c4 e7e6 g2g3 g8f6 f1g2 f8e7 e1g1 e8g8", 57},
+    {"d2d4 d7d5 g1f3 g8f6 c1f4 c7c5 e2e3 b8c6 c2c3 e7e6", 62},
+    {"e2e4 d7d6 d2d4 g8f6 b1c3 g7g6 f2f4 f8g7 g1f3", 66},
+    {"e2e4 g7g6 d2d4 f8g7 b1c3 d7d6 g1f3 c7c6", 44}
 };
 
 /* Portable popcount for C11 baseline. */
 static int bit_count(Bitboard bb) {
+#if defined(__GNUC__) || defined(__clang__)
+    return (int)__builtin_popcountll((unsigned long long)bb);
+#elif defined(_MSC_VER) && defined(_M_X64)
+    return (int)__popcnt64((unsigned __int64)bb);
+#else
     int count = 0;
     while (bb != 0ULL) {
         bb &= (bb - 1ULL);
         count++;
     }
     return count;
+#endif
+}
+
+/* Returns index of least-significant one bit from a non-zero bitboard. */
+static int bit_scan_forward(Bitboard bb) {
+#if defined(__GNUC__) || defined(__clang__)
+    return (int)__builtin_ctzll((unsigned long long)bb);
+#elif defined(_MSC_VER) && defined(_M_X64)
+    unsigned long index = 0UL;
+    _BitScanForward64(&index, (unsigned __int64)bb);
+    return (int)index;
+#else
+    int index = 0;
+    while ((bb & 1ULL) == 0ULL) {
+        bb >>= 1U;
+        index++;
+    }
+    return index;
+#endif
 }
 
 /* Pops and returns least-significant set bit index from a non-zero bitboard. */
 static int pop_lsb(Bitboard* bb) {
-    int index = 0;
-    Bitboard value = *bb;
-
-    while ((value & 1ULL) == 0ULL) {
-        value >>= 1U;
-        index++;
-    }
-
+    int index = bit_scan_forward(*bb);
     *bb &= (*bb - 1ULL);
     return index;
 }
@@ -438,7 +485,7 @@ static bool opening_book_pick_move(const Position* pos, int randomness, Move* ou
         return false;
     }
 
-    if (pos->fullmove_number > 12 || pos->halfmove_clock > 10) {
+    if (pos->fullmove_number > 16 || pos->halfmove_clock > 14) {
         return false;
     }
 
@@ -688,6 +735,38 @@ static void sort_moves(const Position* pos,
         }
 
         list->moves[j + 1] = key;
+    }
+}
+
+/* Looks up previous-iteration root score for one move (or -INF when unknown). */
+static int root_score_for_move(const MoveList* root_moves, const int root_scores[MAX_MOVES], Move move) {
+    for (int i = 0; i < root_moves->count; ++i) {
+        if (move_same(root_moves->moves[i], move)) {
+            return root_scores[i];
+        }
+    }
+    return -INF_SCORE;
+}
+
+/* Reorders already-scored root moves using previous-depth scores first. */
+static void sort_root_moves_by_previous_scores(MoveList* depth_moves,
+                                               const MoveList* root_moves,
+                                               const int root_scores[MAX_MOVES]) {
+    for (int i = 1; i < depth_moves->count; ++i) {
+        Move key = depth_moves->moves[i];
+        int key_prev = root_score_for_move(root_moves, root_scores, key);
+        int j = i - 1;
+
+        while (j >= 0) {
+            int cur_prev = root_score_for_move(root_moves, root_scores, depth_moves->moves[j]);
+            if (cur_prev >= key_prev) {
+                break;
+            }
+            depth_moves->moves[j + 1] = depth_moves->moves[j];
+            j--;
+        }
+
+        depth_moves->moves[j + 1] = key;
     }
 }
 
@@ -1056,9 +1135,16 @@ int evaluate_position(const Position* pos) {
 }
 
 /* Lightweight killer/history update after quiet beta cutoff. */
-static void update_cutoff_heuristics(SearchContext* ctx, const Position* pos, Move move, int depth, int ply) {
+static void update_cutoff_heuristics(SearchContext* ctx,
+                                     const Position* pos,
+                                     Move move,
+                                     const Move quiet_tried[64],
+                                     int quiet_count,
+                                     int depth,
+                                     int ply) {
     bool quiet = ((move.flags & MOVE_FLAG_CAPTURE) == 0U) && ((move.flags & MOVE_FLAG_PROMOTION) == 0U);
     int bonus;
+    int malus;
 
     if (!quiet || ply < 0 || ply >= MAX_SEARCH_PLY) {
         return;
@@ -1073,6 +1159,7 @@ static void update_cutoff_heuristics(SearchContext* ctx, const Position* pos, Mo
     if (bonus < 1) {
         bonus = 1;
     }
+    malus = bonus / 2 + 1;
 
     {
         int* hist = &ctx->history[pos->side_to_move][move.from][move.to];
@@ -1081,14 +1168,28 @@ static void update_cutoff_heuristics(SearchContext* ctx, const Position* pos, Mo
             *hist = 8000;
         }
     }
+
+    for (int i = 0; i < quiet_count; ++i) {
+        if (move_same(quiet_tried[i], move)) {
+            continue;
+        }
+
+        {
+            int* hist = &ctx->history[pos->side_to_move][quiet_tried[i].from][quiet_tried[i].to];
+            *hist -= malus;
+            if (*hist < -8000) {
+                *hist = -8000;
+            }
+        }
+    }
 }
 
 static int quiescence(const Position* pos, int alpha, int beta, int ply, SearchContext* ctx);
 
 /* Negamax with alpha-beta, TT, PVS, LMR, repetition and 50-move draw handling. */
 static int negamax(const Position* pos, int depth, int alpha, int beta, int ply, SearchContext* ctx) {
-    int alpha_orig = alpha;
-    int beta_orig = beta;
+    int alpha_orig;
+    int beta_orig;
     int result = 0;
     bool pushed = false;
     TTEntry* entry;
@@ -1098,6 +1199,8 @@ static int negamax(const Position* pos, int depth, int alpha, int beta, int ply,
     int best_score = -INF_SCORE;
     Move best_move = {0};
     MoveList moves;
+    Move quiet_tried[64];
+    int quiet_count = 0;
 
     if (search_should_stop(ctx)) {
         return 0;
@@ -1110,6 +1213,19 @@ static int negamax(const Position* pos, int depth, int alpha, int beta, int ply,
     if (is_repetition(ctx, pos->zobrist_key)) {
         return 0;
     }
+
+    if (alpha < (-MATE_SCORE + ply)) {
+        alpha = -MATE_SCORE + ply;
+    }
+    if (beta > (MATE_SCORE - ply - 1)) {
+        beta = MATE_SCORE - ply - 1;
+    }
+    if (alpha >= beta) {
+        return alpha;
+    }
+
+    alpha_orig = alpha;
+    beta_orig = beta;
 
     if (depth <= 0) {
         return quiescence(pos, alpha, beta, ply, ctx);
@@ -1270,6 +1386,10 @@ static int negamax(const Position* pos, int depth, int alpha, int beta, int ply,
             goto cleanup;
         }
 
+        if (quiet_non_castle && quiet_count < (int)(sizeof(quiet_tried) / sizeof(quiet_tried[0]))) {
+            quiet_tried[quiet_count++] = move;
+        }
+
         if (score > best_score) {
             best_score = score;
             best_move = move;
@@ -1280,7 +1400,7 @@ static int negamax(const Position* pos, int depth, int alpha, int beta, int ply,
         }
 
         if (alpha >= beta) {
-            update_cutoff_heuristics(ctx, pos, move, depth, ply);
+            update_cutoff_heuristics(ctx, pos, move, quiet_tried, quiet_count, depth, ply);
             break;
         }
     }
@@ -1298,10 +1418,13 @@ static int negamax(const Position* pos, int depth, int alpha, int beta, int ply,
             exact = true;
         }
 
-        if (entry->key != pos->zobrist_key || depth + (exact ? 1 : 0) >= entry->depth) {
+        if (entry->key != pos->zobrist_key ||
+            depth + (exact ? 1 : 0) >= entry->depth ||
+            entry->generation != ctx->generation) {
             entry->key = pos->zobrist_key;
             entry->depth = depth;
             entry->score = score_to_tt(best_score, ply);
+            entry->generation = ctx->generation;
             entry->best_move = best_move;
             entry->flag = new_flag;
         }
@@ -1424,6 +1547,7 @@ cleanup:
 /* Clears transposition table content. */
 void engine_reset_transposition_table(void) {
     memset(g_tt, 0, sizeof(g_tt));
+    g_tt_generation = 1;
 }
 
 /* Iterative deepening root search with optional move-randomness window. */
@@ -1454,6 +1578,11 @@ void search_best_move(const Position* pos, const SearchLimits* limits, SearchRes
     memset(&ctx, 0, sizeof(ctx));
     ctx.limits = local_limits;
     ctx.start_ms = now_ms();
+    g_tt_generation++;
+    if (g_tt_generation == 0U) {
+        g_tt_generation = 1U;
+    }
+    ctx.generation = g_tt_generation;
     ctx.path_keys[0] = pos->zobrist_key;
     ctx.path_len = 1;
 
@@ -1528,6 +1657,9 @@ void search_best_move(const Position* pos, const SearchLimits* limits, SearchRes
             int search_beta = beta;
 
             sort_moves(pos, &depth_moves, tt_move, &ctx, 0, false);
+            if (depth > 1) {
+                sort_root_moves_by_previous_scores(&depth_moves, &root_moves, root_scores);
+            }
 
             for (int i = 0; i < depth_moves.count; ++i) {
                 Position next = *pos;

@@ -3,6 +3,9 @@
 #include <ctype.h>
 #include <string.h>
 #include <time.h>
+#ifdef _MSC_VER
+#include <intrin.h>
+#endif
 
 /* File masks used for pawn attack shifts to avoid board wrap-around. */
 #define NOT_FILE_A 0xFEFEFEFEFEFEFEFEULL
@@ -27,16 +30,43 @@ static Bitboard bb_square(int square) {
     return 1ULL << square;
 }
 
-/* Pops and returns least-significant set bit index from a non-zero bitboard. */
-static int pop_lsb(Bitboard* bb) {
-    int index = 0;
-    Bitboard value = *bb;
+/* Fast popcount helper (with portable fallback). */
+static int bit_count(Bitboard bb) {
+#if defined(__GNUC__) || defined(__clang__)
+    return (int)__builtin_popcountll((unsigned long long)bb);
+#elif defined(_MSC_VER) && defined(_M_X64)
+    return (int)__popcnt64((unsigned __int64)bb);
+#else
+    int count = 0;
+    while (bb != 0ULL) {
+        bb &= (bb - 1ULL);
+        count++;
+    }
+    return count;
+#endif
+}
 
-    while ((value & 1ULL) == 0ULL) {
-        value >>= 1U;
+/* Returns index of least-significant one bit from a non-zero bitboard. */
+static int bit_scan_forward(Bitboard bb) {
+#if defined(__GNUC__) || defined(__clang__)
+    return (int)__builtin_ctzll((unsigned long long)bb);
+#elif defined(_MSC_VER) && defined(_M_X64)
+    unsigned long index = 0UL;
+    _BitScanForward64(&index, (unsigned __int64)bb);
+    return (int)index;
+#else
+    int index = 0;
+    while ((bb & 1ULL) == 0ULL) {
+        bb >>= 1U;
         index++;
     }
+    return index;
+#endif
+}
 
+/* Pops and returns least-significant set bit index from a non-zero bitboard. */
+static int pop_lsb(Bitboard* bb) {
+    int index = bit_scan_forward(*bb);
     *bb &= (*bb - 1ULL);
     return index;
 }
@@ -471,6 +501,16 @@ bool position_set_from_fen(Position* pos, const char* fen) {
         pos->fullmove_number = (fullmove == 0U) ? 1U : ((fullmove > 65535U) ? 65535U : (uint16_t)fullmove);
     }
 
+    if (bit_count(pos->pieces[SIDE_WHITE][PIECE_KING]) != 1 ||
+        bit_count(pos->pieces[SIDE_BLACK][PIECE_KING]) != 1) {
+        return false;
+    }
+
+    if (((pos->pieces[SIDE_WHITE][PIECE_PAWN] | pos->pieces[SIDE_BLACK][PIECE_PAWN]) &
+         0xFF000000000000FFULL) != 0ULL) {
+        return false;
+    }
+
     position_refresh_occupancy(pos);
     pos->zobrist_key = position_compute_zobrist(pos);
     return true;
@@ -597,14 +637,7 @@ int engine_find_king_square(const Position* pos, Side side) {
         return -1;
     }
 
-    {
-        int sq = 0;
-        while ((king & 1ULL) == 0ULL) {
-            king >>= 1U;
-            sq++;
-        }
-        return sq;
-    }
+    return bit_scan_forward(king);
 }
 
 /* True when a square is attacked by at least one piece of the given side. */
@@ -664,11 +697,7 @@ bool engine_is_square_attacked(const Position* pos, int square, Side by_side) {
     {
         Bitboard king = pos->pieces[by_side][PIECE_KING];
         if (king != 0ULL) {
-            int king_sq = 0;
-            while ((king & 1ULL) == 0ULL) {
-                king >>= 1U;
-                king_sq++;
-            }
+            int king_sq = bit_scan_forward(king);
 
             if ((g_king_attacks[king_sq] & target) != 0ULL) {
                 return true;

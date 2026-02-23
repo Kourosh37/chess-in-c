@@ -28,6 +28,9 @@ static bool g_storage_paths_ready = false;
 #define ONLINE_SESSIONS_MAGIC 0x43484F4EU /* CHON */
 #define ONLINE_SESSIONS_VERSION 1U
 #define CASTLE_SECOND_SFX_DELAY_SECONDS 0.11f
+#define AI_MIN_DEPTH 2
+#define AI_MAX_DEPTH 16
+#define AI_MAX_TIME_MS 12000
 
 typedef struct PersistedOnlineHeader {
     uint32_t magic;
@@ -588,6 +591,7 @@ static void sync_app_from_match(ChessApp* app, const OnlineMatch* match, bool op
 /* Maps one user-facing AI difficulty percent into internal search limits. */
 void app_set_ai_difficulty(ChessApp* app, int difficulty_percent) {
     int difficulty;
+    int depth_span;
     int depth;
     int max_time_ms;
 
@@ -598,23 +602,27 @@ void app_set_ai_difficulty(ChessApp* app, int difficulty_percent) {
     difficulty = clamp_difficulty_percent(difficulty_percent);
     app->ai_difficulty = difficulty;
 
-    depth = 2 + ((difficulty * 12 + 50) / 100); /* 2..14 */
-    if (depth < 2) {
-        depth = 2;
+    depth_span = AI_MAX_DEPTH - AI_MIN_DEPTH;
+    depth = AI_MIN_DEPTH + ((difficulty * depth_span + 50) / 100); /* AI_MIN_DEPTH..AI_MAX_DEPTH */
+    if (depth < AI_MIN_DEPTH) {
+        depth = AI_MIN_DEPTH;
     }
-    if (depth > 14) {
-        depth = 14;
+    if (depth > AI_MAX_DEPTH) {
+        depth = AI_MAX_DEPTH;
     }
 
-    max_time_ms = 350 + difficulty * 55;
-    if (difficulty >= 90) {
-        max_time_ms += 900;
+    max_time_ms = 300 + difficulty * 70;
+    if (difficulty >= 85) {
+        max_time_ms += 800;
     }
-    if (difficulty >= 98) {
-        max_time_ms += 1400;
+    if (difficulty >= 95) {
+        max_time_ms += 1700;
     }
-    if (max_time_ms > 9000) {
-        max_time_ms = 9000;
+    if (difficulty >= 100) {
+        max_time_ms += 2200;
+    }
+    if (max_time_ms > AI_MAX_TIME_MS) {
+        max_time_ms = AI_MAX_TIME_MS;
     }
 
     app->ai_limits.depth = depth;
@@ -681,11 +689,11 @@ static void load_settings(ChessApp* app) {
                 has_ai_difficulty = true;
             } else if (strncmp(line, "ai_depth=", 9) == 0) {
                 int depth = atoi(line + 9);
-                if (depth < 1) {
-                    depth = 1;
+                if (depth < AI_MIN_DEPTH) {
+                    depth = AI_MIN_DEPTH;
                 }
-                if (depth > 14) {
-                    depth = 14;
+                if (depth > AI_MAX_DEPTH) {
+                    depth = AI_MAX_DEPTH;
                 }
                 legacy_depth = depth;
             } else if (strncmp(line, "ai_randomness=", 14) == 0) {
@@ -757,12 +765,13 @@ static void load_settings(ChessApp* app) {
         int blended;
         int clamped_depth = (legacy_depth >= 0) ? legacy_depth : app->ai_limits.depth;
         int clamped_randomness = (legacy_randomness >= 0) ? legacy_randomness : app->ai_limits.randomness;
+        int depth_span = AI_MAX_DEPTH - AI_MIN_DEPTH;
 
-        if (clamped_depth < 1) {
-            clamped_depth = 1;
+        if (clamped_depth < AI_MIN_DEPTH) {
+            clamped_depth = AI_MIN_DEPTH;
         }
-        if (clamped_depth > 14) {
-            clamped_depth = 14;
+        if (clamped_depth > AI_MAX_DEPTH) {
+            clamped_depth = AI_MAX_DEPTH;
         }
         if (clamped_randomness < 0) {
             clamped_randomness = 0;
@@ -771,7 +780,11 @@ static void load_settings(ChessApp* app) {
             clamped_randomness = 100;
         }
 
-        depth_percent = ((clamped_depth - 1) * 100 + 6) / 13;
+        if (depth_span <= 0) {
+            depth_percent = 100;
+        } else {
+            depth_percent = ((clamped_depth - AI_MIN_DEPTH) * 100 + (depth_span / 2)) / depth_span;
+        }
         consistency_percent = 100 - clamped_randomness;
         blended = (depth_percent * 65 + consistency_percent * 35 + 50) / 100;
         app_set_ai_difficulty(app, blended);

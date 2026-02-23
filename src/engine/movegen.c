@@ -1,6 +1,9 @@
 #include "engine.h"
 
 #include <string.h>
+#ifdef _MSC_VER
+#include <intrin.h>
+#endif
 
 /* Castling rights bit layout (KQkq). */
 #define CASTLE_WHITE_KING  0x01
@@ -13,16 +16,27 @@ static Bitboard bb_square(int square) {
     return 1ULL << square;
 }
 
-/* Pops and returns least-significant set bit index from a non-zero bitboard. */
-static int pop_lsb(Bitboard* bb) {
+/* Returns index of least-significant one bit from a non-zero bitboard. */
+static int bit_scan_forward(Bitboard bb) {
+#if defined(__GNUC__) || defined(__clang__)
+    return (int)__builtin_ctzll((unsigned long long)bb);
+#elif defined(_MSC_VER) && defined(_M_X64)
+    unsigned long index = 0UL;
+    _BitScanForward64(&index, (unsigned __int64)bb);
+    return (int)index;
+#else
     int index = 0;
-    Bitboard value = *bb;
-
-    while ((value & 1ULL) == 0ULL) {
-        value >>= 1U;
+    while ((bb & 1ULL) == 0ULL) {
+        bb >>= 1U;
         index++;
     }
+    return index;
+#endif
+}
 
+/* Pops and returns least-significant set bit index from a non-zero bitboard. */
+static int pop_lsb(Bitboard* bb) {
+    int index = bit_scan_forward(*bb);
     *bb &= (*bb - 1ULL);
     return index;
 }
@@ -190,10 +204,7 @@ static void generate_king_moves(const Position* pos, Side us, MoveList* list) {
         return;
     }
 
-    while ((king & 1ULL) == 0ULL) {
-        king >>= 1U;
-        from++;
-    }
+    from = bit_scan_forward(king);
 
     {
         Bitboard attacks = engine_get_king_attacks(from) & ~pos->occupied[us];
