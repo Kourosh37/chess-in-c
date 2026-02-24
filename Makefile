@@ -21,6 +21,7 @@ SRC = \
 	src/core/audio.c \
 	src/core/game_state.c \
 	src/core/main_loop.c \
+	src/core/platform_dialog.c \
 	src/engine/bitboard.c \
 	src/engine/movegen.c \
 	src/engine/search.c \
