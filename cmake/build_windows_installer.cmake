@@ -31,8 +31,9 @@ if(NOT DEFINED CHESS_ISCC_EXE OR CHESS_ISCC_EXE STREQUAL "" OR CHESS_ISCC_EXE MA
     find_program(CHESS_ISCC_EXE
         NAMES iscc iscc.exe
         HINTS
-            "$ENV{ProgramFiles(x86)}/Inno Setup 6"
+            "$ENV{ProgramW6432}/Inno Setup 6"
             "$ENV{ProgramFiles}/Inno Setup 6"
+            "C:/Program Files (x86)/Inno Setup 6"
     )
 endif()
 
