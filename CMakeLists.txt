@@ -154,9 +154,18 @@ if(WIN32 AND CHESS_BUILD_APP)
             "$ENV{ProgramFiles}/7-Zip"
             "$ENV{ProgramW6432}/7-Zip"
     )
+    find_program(CHESS_ISCC_EXE
+        NAMES iscc iscc.exe
+        HINTS
+            "$ENV{ProgramFiles(x86)}/Inno Setup 6"
+            "$ENV{ProgramFiles}/Inno Setup 6"
+    )
 
     if(NOT CHESS_7Z_EXE)
         message(WARNING "7z.exe was not found. Install 7-Zip (example: winget install --id 7zip.7zip).")
+    endif()
+    if(NOT CHESS_ISCC_EXE)
+        message(WARNING "iscc.exe (Inno Setup) was not found. Install Inno Setup 6 for installer packaging.")
     endif()
 
     add_custom_target(chess_onefile
@@ -166,10 +175,11 @@ if(WIN32 AND CHESS_BUILD_APP)
             -DCHESS_SOURCE_DIR=${CMAKE_SOURCE_DIR}
             -DCHESS_OUT_DIR=${CMAKE_BINARY_DIR}/release
             -DCHESS_7Z_EXE=${CHESS_7Z_EXE}
+            -DCHESS_ISCC_EXE=${CHESS_ISCC_EXE}
             -DCHESS_RELEASE_VERSION=${CHESS_RELEASE_VERSION}
-            -P ${CMAKE_SOURCE_DIR}/cmake/build_onefile.cmake
+            -P ${CMAKE_SOURCE_DIR}/cmake/build_windows_installer.cmake
         DEPENDS chess_app
-        COMMENT "Building standalone one-file Chess executable"
+        COMMENT "Building Windows installer (one-file) for Chess"
         VERBATIM
     )
 endif()
