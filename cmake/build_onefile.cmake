@@ -62,6 +62,9 @@ set(_release_dir "${CHESS_OUT_DIR}")
 set(_stage_dir "${_release_dir}/_onefile_stage")
 set(_stage_chess_dir "${_stage_dir}/chess")
 set(_payload_file "${_release_dir}/chess_payload.7z")
+set(_sfx_config_file "${_release_dir}/chess_sfx_config.txt")
+set(_installer_cmd "${_stage_dir}/install_chess.cmd")
+set(_installer_ps1 "${_stage_dir}/install_chess.ps1")
 set(_latest_output_file "${_release_dir}/chess.exe")
 set(_latest_sha256_file "${_latest_output_file}.sha256")
 set(_version "${CHESS_RELEASE_VERSION}")
@@ -92,6 +95,52 @@ foreach(_project_dll IN LISTS _project_root_dlls)
         file(COPY "${_project_dll}" DESTINATION "${_stage_chess_dir}")
     endif()
 endforeach()
+
+# Installer helper script: copy runtime to user-local install path and create Desktop shortcut.
+file(WRITE "${_installer_ps1}" [=[
+$ErrorActionPreference = "Stop"
+
+$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$sourceDir = Join-Path $scriptDir "chess"
+$installDir = Join-Path $env:LOCALAPPDATA "Chess"
+$targetExe = Join-Path $installDir "chess_app.exe"
+
+if (-not (Test-Path -LiteralPath $sourceDir)) {
+    throw "Missing extracted payload folder: $sourceDir"
+}
+
+if (-not (Test-Path -LiteralPath $installDir)) {
+    New-Item -ItemType Directory -Path $installDir | Out-Null
+}
+
+& robocopy $sourceDir $installDir /E /R:1 /W:1 /NFL /NDL /NJH /NJS /NC /NS | Out-Null
+if ($LASTEXITCODE -gt 7) {
+    throw "Install copy failed with robocopy exit code $LASTEXITCODE"
+}
+
+if (-not (Test-Path -LiteralPath $targetExe)) {
+    throw "Installed executable not found: $targetExe"
+}
+
+$desktopDir = [Environment]::GetFolderPath("Desktop")
+$shortcutPath = Join-Path $desktopDir "Chess.lnk"
+$shell = New-Object -ComObject WScript.Shell
+$shortcut = $shell.CreateShortcut($shortcutPath)
+$shortcut.TargetPath = $targetExe
+$shortcut.WorkingDirectory = $installDir
+$shortcut.IconLocation = "$targetExe,0"
+$shortcut.Description = "Chess"
+$shortcut.Save()
+
+Start-Process -FilePath $targetExe -WorkingDirectory $installDir
+]=])
+
+file(WRITE "${_installer_cmd}" [=[
+@echo off
+setlocal
+powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%~dp0install_chess.ps1"
+endlocal
+]=])
 
 # Bundle non-system runtime DLLs when present (toolchain/runtime dependent).
 set(_stage_app_exe "${_stage_chess_dir}/${_app_name}")
@@ -134,10 +183,36 @@ if(NOT _pack_result EQUAL 0)
         "stderr:\n${_pack_stderr}")
 endif()
 
+file(WRITE "${_sfx_config_file}" [=[;!@Install@!UTF-8!
+Title="Chess Installer"
+BeginPrompt="Install Chess to your user profile and create a Desktop shortcut?"
+ExtractTitle="Installing Chess"
+ExtractDialogText="Installing files..."
+GUIMode="1"
+RunProgram="install_chess.cmd"
+;!@InstallEnd@!
+]=])
+
+execute_process(
+    COMMAND "${CHESS_7Z_EXE}" a -t7z -mx=9 -bd -y "${_payload_file}" "install_chess.cmd" "install_chess.ps1"
+    WORKING_DIRECTORY "${_stage_dir}"
+    RESULT_VARIABLE _pack_installer_result
+    OUTPUT_VARIABLE _pack_installer_stdout
+    ERROR_VARIABLE _pack_installer_stderr
+)
+
+if(NOT _pack_installer_result EQUAL 0)
+    message(FATAL_ERROR
+        "7z failed while adding installer scripts.\n"
+        "stdout:\n${_pack_installer_stdout}\n"
+        "stderr:\n${_pack_installer_stderr}")
+endif()
+
 set(_concat_ps1 "${_release_dir}/concat_onefile.ps1")
 file(WRITE "${_concat_ps1}" [=[
 param(
     [Parameter(Mandatory = $true)][string]$Sfx,
+    [Parameter(Mandatory = $true)][string]$Config,
     [Parameter(Mandatory = $true)][string]$Payload,
     [Parameter(Mandatory = $true)][string]$Out
 )
@@ -151,7 +226,7 @@ if (-not (Test-Path -LiteralPath $outDir)) {
 
 $dst = [System.IO.File]::Open($Out, [System.IO.FileMode]::Create, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
 try {
-    foreach ($src in @($Sfx, $Payload)) {
+    foreach ($src in @($Sfx, $Config, $Payload)) {
         $data = [System.IO.File]::ReadAllBytes($src)
         $dst.Write($data, 0, $data.Length)
     }
@@ -165,6 +240,7 @@ execute_process(
     COMMAND powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass
         -File "${_concat_ps1}"
         -Sfx "${_sfx_module}"
+        -Config "${_sfx_config_file}"
         -Payload "${_payload_file}"
         -Out "${_output_file}"
     RESULT_VARIABLE _copy_result
@@ -193,6 +269,7 @@ endif()
 
 file(REMOVE_RECURSE "${_stage_dir}")
 file(REMOVE "${_payload_file}")
+file(REMOVE "${_sfx_config_file}")
 file(REMOVE "${_concat_ps1}")
 
 if(NOT _version STREQUAL "")
