@@ -7,6 +7,10 @@
 
 #include <raylib.h>
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 #include "game_state.h"
 #include "gui.h"
 #include "audio.h"
@@ -15,6 +19,21 @@
 #define MAX_NET_PACKETS_PER_FRAME 16
 /* Runtime-loaded window icon path (place PNG image here). */
 #define WINDOW_ICON_PATH "assets/icons/app_icon.png"
+
+/* Shows a visible startup failure message instead of silent exit. */
+static void show_startup_error(const char* title, const char* message) {
+#ifdef _WIN32
+    MessageBoxA(NULL,
+                (message != NULL && message[0] != '\0') ? message : "Unknown startup failure.",
+                (title != NULL && title[0] != '\0') ? title : "Chess Error",
+                MB_OK | MB_ICONERROR | MB_TASKMODAL);
+#else
+    fprintf(stderr,
+            "%s: %s\n",
+            (title != NULL) ? title : "Chess Error",
+            (message != NULL) ? message : "Unknown startup failure.");
+#endif
+}
 
 /* Builds one path string from base + relative part with safe separator handling. */
 static void compose_path(char out[1024], const char* base, const char* relative) {
@@ -880,6 +899,12 @@ int run_main_loop(void) {
 
     SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT);
     InitWindow(1280, 820, "Chess");
+    if (!IsWindowReady()) {
+        show_startup_error("Chess Startup Error",
+                           "Could not initialize the graphics window.\n"
+                           "Please update GPU drivers and try again.");
+        return 1;
+    }
     try_set_window_icon();
     SetWindowMinSize(920, 640);
     SetTargetFPS(60);

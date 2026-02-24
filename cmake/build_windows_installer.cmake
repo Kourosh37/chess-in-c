@@ -71,14 +71,6 @@ file(MAKE_DIRECTORY "${_stage_chess_dir}")
 file(COPY "${CHESS_APP_EXE}" DESTINATION "${_stage_chess_dir}")
 file(COPY "${CHESS_SOURCE_ASSETS}" DESTINATION "${_stage_chess_dir}")
 
-# Bundle user-provided runtime DLLs placed at project root.
-file(GLOB _project_root_dlls "${CHESS_SOURCE_DIR}/*.dll")
-foreach(_project_dll IN LISTS _project_root_dlls)
-    if(EXISTS "${_project_dll}")
-        file(COPY "${_project_dll}" DESTINATION "${_stage_chess_dir}")
-    endif()
-endforeach()
-
 # Bundle non-system runtime DLLs when present (toolchain/runtime dependent).
 set(_stage_app_exe "${_stage_chess_dir}/${_app_name}")
 if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.21")
@@ -138,11 +130,11 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 Source: "@STAGE@\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
 
 [Icons]
-Name: "{autoprograms}\Chess"; Filename: "{app}\@APP_EXE@"
-Name: "{autodesktop}\Chess"; Filename: "{app}\@APP_EXE@"; Tasks: desktopicon
+Name: "{autoprograms}\Chess"; Filename: "{app}\@APP_EXE@"; WorkingDir: "{app}"
+Name: "{autodesktop}\Chess"; Filename: "{app}\@APP_EXE@"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\@APP_EXE@"; Description: "Launch Chess"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\@APP_EXE@"; Description: "Launch Chess"; WorkingDir: "{app}"; Flags: nowait postinstall skipifsilent
 ]=])
 
 file(READ "${_iss_file}" _iss_text)

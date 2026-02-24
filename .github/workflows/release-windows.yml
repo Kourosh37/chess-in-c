@@ -70,7 +70,8 @@ jobs:
             "-DCMAKE_BUILD_TYPE:STRING=Release" `
             "-DCHESS_RELEASE_VERSION:STRING=$version" `
             "-DCHESS_RELEASE_ARCH:STRING=x64" `
-            "-DCHESS_WINDOWS_PORTABLE_RUNTIME:BOOL=ON"
+            "-DCHESS_WINDOWS_PORTABLE_RUNTIME:BOOL=OFF" `
+            "-DCHESS_WINDOWS_FORCE_STATIC_GNU_RUNTIME:BOOL=OFF"
 
       - name: Build windows release artifacts
         shell: pwsh
