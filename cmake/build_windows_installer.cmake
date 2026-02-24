@@ -97,6 +97,22 @@ if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.21")
     endif()
 endif()
 
+# Extra safety for MinGW builds: bundle runtime DLLs from the active compiler directory.
+if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
+    get_filename_component(_c_compiler_dir "${CMAKE_C_COMPILER}" DIRECTORY)
+    foreach(_rt_name IN ITEMS
+        libgcc_s_seh-1.dll
+        libgcc_s_dw2-1.dll
+        libwinpthread-1.dll
+        libstdc++-6.dll
+    )
+        set(_rt_path "${_c_compiler_dir}/${_rt_name}")
+        if(EXISTS "${_rt_path}")
+            file(COPY "${_rt_path}" DESTINATION "${_stage_chess_dir}")
+        endif()
+    endforeach()
+endif()
+
 string(REPLACE "\\" "\\\\" _stage_chess_dir_iss "${_stage_chess_dir}")
 string(REPLACE "\\" "\\\\" _release_dir_iss "${_release_dir}")
 string(REPLACE "\\" "\\\\" _app_name_iss "${_app_name}")
@@ -108,13 +124,14 @@ AppName=Chess
 AppVersion=@VERSION@
 AppPublisher=ChessProject
 DefaultDirName={autopf}\Chess
+UsePreviousAppDir=no
 DefaultGroupName=Chess
 DisableProgramGroupPage=yes
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
-PrivilegesRequired=lowest
-PrivilegesRequiredOverridesAllowed=dialog
+PrivilegesRequired=admin
+PrivilegesRequiredOverridesAllowed=commandline
 ArchitecturesInstallIn64BitMode=x64
 OutputDir=@OUTDIR@
 OutputBaseFilename=@OUTBASE@
@@ -125,6 +142,12 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: checkedonce
+
+[InstallDelete]
+Type: files; Name: "{app}\libgcc_s_seh-1.dll"
+Type: files; Name: "{app}\libgcc_s_dw2-1.dll"
+Type: files; Name: "{app}\libwinpthread-1.dll"
+Type: files; Name: "{app}\libstdc++-6.dll"
 
 [Files]
 Source: "@STAGE@\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
