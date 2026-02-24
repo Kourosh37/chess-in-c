@@ -71,9 +71,23 @@ file(MAKE_DIRECTORY "${_stage_chess_dir}")
 file(COPY "${CHESS_APP_EXE}" DESTINATION "${_stage_chess_dir}")
 file(COPY "${CHESS_SOURCE_ASSETS}" DESTINATION "${_stage_chess_dir}")
 
-# Bundle non-system runtime DLLs when present (toolchain/runtime dependent).
+# Always include user-provided project DLLs next to chess_app.exe.
+# Put optional native dependencies in repository root or runtime/windows/.
+file(GLOB _project_runtime_dlls
+    "${CHESS_SOURCE_DIR}/*.dll"
+    "${CHESS_SOURCE_DIR}/runtime/windows/*.dll"
+)
+foreach(_dll IN LISTS _project_runtime_dlls)
+    if(EXISTS "${_dll}")
+        file(COPY "${_dll}" DESTINATION "${_stage_chess_dir}")
+    endif()
+endforeach()
+
+# For GNU toolchains, include non-system runtime DLLs.
+# For MSVC release builds we intentionally avoid dependency scanning to prevent
+# bundling Windows system DLLs, which can break startup on user machines.
 set(_stage_app_exe "${_stage_chess_dir}/${_app_name}")
-if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.21")
+if(CMAKE_C_COMPILER_ID STREQUAL "GNU" AND CMAKE_VERSION VERSION_GREATER_EQUAL "3.21")
     file(GET_RUNTIME_DEPENDENCIES
         EXECUTABLES "${_stage_app_exe}"
         RESOLVED_DEPENDENCIES_VAR _runtime_deps
@@ -81,15 +95,21 @@ if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.21")
         PRE_EXCLUDE_REGEXES
             "api-ms-.*"
             "ext-ms-.*"
-        POST_EXCLUDE_REGEXES
-            ".*/Windows/System32/.*"
-            ".*/Windows/SysWOW64/.*"
     )
 
     foreach(_dep IN LISTS _runtime_deps)
-        if(EXISTS "${_dep}")
-            file(COPY "${_dep}" DESTINATION "${_stage_chess_dir}")
+        if(NOT EXISTS "${_dep}")
+            continue()
         endif()
+
+        file(TO_CMAKE_PATH "${_dep}" _dep_norm)
+        string(TOLOWER "${_dep_norm}" _dep_norm_lower)
+
+        if(_dep_norm_lower MATCHES "^[a-z]:/windows/(system32|syswow64|winsxs)/")
+            continue()
+        endif()
+
+        file(COPY "${_dep}" DESTINATION "${_stage_chess_dir}")
     endforeach()
 
     if(_runtime_unresolved)
@@ -144,6 +164,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: checkedonce
 
 [InstallDelete]
+Type: files; Name: "{app}\*.dll"
 Type: files; Name: "{app}\libgcc_s_seh-1.dll"
 Type: files; Name: "{app}\libgcc_s_dw2-1.dll"
 Type: files; Name: "{app}\libwinpthread-1.dll"
