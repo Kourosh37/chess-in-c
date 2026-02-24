@@ -1,6 +1,5 @@
 #include "main_loop.h"
 
-#include <pthread.h>
 #include <stdatomic.h>
 #include <stdio.h>
 #include <string.h>
@@ -11,6 +10,7 @@
 #include "gui.h"
 #include "audio.h"
 #include "platform_dialog.h"
+#include "threading.h"
 
 /* Upper bound to avoid spending too much frame time draining network queue. */
 #define MAX_NET_PACKETS_PER_FRAME 16
@@ -159,7 +159,7 @@ typedef struct AIWorker {
     atomic_bool running;
     atomic_bool has_result;
     bool thread_active;
-    pthread_t handle;
+    ChessThread handle;
 } AIWorker;
 
 /* Worker thread entry point: run search and publish result atomically. */
@@ -193,7 +193,7 @@ static bool ai_worker_start(AIWorker* worker, const Position* position, const Se
     atomic_store(&worker->running, true);
     atomic_store(&worker->has_result, false);
 
-    if (pthread_create(&worker->handle, NULL, ai_worker_thread, worker) != 0) {
+    if (!chess_thread_create(&worker->handle, ai_worker_thread, worker)) {
         atomic_store(&worker->running, false);
         return false;
     }
@@ -208,7 +208,7 @@ static void ai_worker_join(AIWorker* worker) {
         return;
     }
 
-    pthread_join(worker->handle, NULL);
+    chess_thread_join(&worker->handle);
     worker->thread_active = false;
 }
 
@@ -233,7 +233,7 @@ typedef struct OnlineWorker {
     atomic_bool running;
     atomic_bool has_result;
     bool thread_active;
-    pthread_t handle;
+    ChessThread handle;
 } OnlineWorker;
 
 /* Copies one robust network error string into worker result buffer. */
@@ -362,7 +362,7 @@ static bool online_worker_start(OnlineWorker* worker, const ChessApp* app) {
     atomic_store(&worker->running, true);
     atomic_store(&worker->has_result, false);
 
-    if (pthread_create(&worker->handle, NULL, online_worker_thread, worker) != 0) {
+    if (!chess_thread_create(&worker->handle, online_worker_thread, worker)) {
         atomic_store(&worker->running, false);
         return false;
     }
@@ -380,7 +380,7 @@ static bool online_worker_try_join(OnlineWorker* worker) {
         return false;
     }
 
-    pthread_join(worker->handle, NULL);
+    chess_thread_join(&worker->handle);
     worker->thread_active = false;
     return true;
 }
@@ -392,7 +392,7 @@ static void online_worker_shutdown(OnlineWorker* worker) {
     }
 
     if (worker->thread_active) {
-        pthread_join(worker->handle, NULL);
+        chess_thread_join(&worker->handle);
         worker->thread_active = false;
     }
 

@@ -22,19 +22,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup MSYS2 (MinGW64 toolchain)
-        uses: msys2/setup-msys2@v2
+      - name: Setup MSVC x64 environment
+        uses: ilammy/msvc-dev-cmd@v1
         with:
-          update: true
-          install: >-
-            mingw-w64-x86_64-gcc
-            mingw-w64-x86_64-ninja
-            mingw-w64-x86_64-cmake
-
-      - name: Use MinGW64 binaries in PATH
-        shell: pwsh
-        run: |
-          "C:\msys64\mingw64\bin" >> $env:GITHUB_PATH
+          arch: x64
 
       - name: Resolve version
         id: version
@@ -53,24 +44,23 @@ jobs:
 
           "value=$releaseVersion" >> $env:GITHUB_OUTPUT
 
-      - name: Ensure Ninja and 7-Zip
+      - name: Ensure tools
         shell: pwsh
         run: |
-          choco install 7zip innosetup -y --no-progress
+          choco install ninja 7zip innosetup -y --no-progress
 
       - name: Configure
         shell: pwsh
         run: |
           $version = "${{ steps.version.outputs.value }}"
-          gcc --version
+          cl
           cmake --version
           ninja --version
-          $env:CC = "gcc"
           cmake -S . -B build -G Ninja `
             "-DCMAKE_BUILD_TYPE:STRING=Release" `
             "-DCHESS_RELEASE_VERSION:STRING=$version" `
             "-DCHESS_RELEASE_ARCH:STRING=x64" `
-            "-DCHESS_WINDOWS_PORTABLE_RUNTIME:BOOL=OFF" `
+            "-DCHESS_WINDOWS_PORTABLE_RUNTIME:BOOL=ON" `
             "-DCHESS_WINDOWS_FORCE_STATIC_GNU_RUNTIME:BOOL=OFF"
 
       - name: Build windows release artifacts

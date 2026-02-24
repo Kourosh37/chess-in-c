@@ -77,6 +77,7 @@ if(CHESS_BUILD_APP)
         src/core/game_state.c
         src/core/main_loop.c
         src/core/platform_dialog.c
+        src/core/threading.c
         ${CHESS_ENGINE_CORE_SOURCES}
         src/gui/font.c
         src/gui/renderer.c
