@@ -273,3 +273,27 @@ if(BUILD_TESTING AND CHESS_BUILD_STORAGE_TESTS)
             -DCHESS_TEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/storage-tests
             -P ${CMAKE_CURRENT_SOURCE_DIR}/tools/run_storage_tests.cmake)
 endif()
+
+if(BUILD_TESTING AND WIN32)
+    foreach(_fixture IN ITEMS optional system app)
+        add_library(chess_runtime_${_fixture} SHARED tools/runtime_fixture.c)
+        string(TOUPPER "${_fixture}" _fixture_kind)
+        target_compile_definitions(chess_runtime_${_fixture} PRIVATE CHESS_RUNTIME_${_fixture_kind})
+        set_target_properties(chess_runtime_${_fixture} PROPERTIES
+            PREFIX "" RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/runtime-fixture")
+    endforeach()
+    target_link_libraries(chess_runtime_system PRIVATE chess_runtime_optional)
+    add_executable(chess_runtime_probe tools/runtime_fixture.c)
+    target_link_libraries(chess_runtime_probe PRIVATE chess_runtime_system chess_runtime_app)
+    set_target_properties(chess_runtime_probe PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/runtime-fixture")
+    add_test(NAME windows_runtime_packaging
+        COMMAND ${CMAKE_COMMAND}
+            -DCHESS_TEST_EXE=$<TARGET_FILE:chess_runtime_probe>
+            -DCHESS_TEST_SYSTEM_DLL=$<TARGET_FILE:chess_runtime_system>
+            -DCHESS_TEST_APP_DLL=$<TARGET_FILE:chess_runtime_app>
+            -DCHESS_TEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/runtime-tests
+            -DCHESS_COMPILER_ID=${CMAKE_C_COMPILER_ID}
+            -DCHESS_OBJDUMP=${CMAKE_OBJDUMP}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/tools/run_runtime_tests.cmake)
+endif()
