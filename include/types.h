@@ -2,7 +2,7 @@
 #define TYPES_H
 
 /*
- * Shared project-wide data types for the chess engine, GUI, and networking
+ * Shared project-wide data types for the chess engine and GUI
  * layers. Keeping these definitions in one header prevents type drift between
  * modules and helps preserve a clean, decoupled architecture.
  */
@@ -10,11 +10,10 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-/* Board and protocol limits. */
+/* Board and profile limits. */
 #define BOARD_SQUARES 64
 #define MAX_MOVES 256
 #define MOVE_LOG_MAX 512
-#define INVITE_CODE_LEN 10
 #define PLAYER_NAME_MAX 31
 
 typedef uint64_t Bitboard;
@@ -39,34 +38,15 @@ typedef enum PieceType {
 /* High-level play modes exposed by the application. */
 typedef enum GameMode {
     MODE_SINGLE = 0,
-    MODE_LOCAL = 1,
-    MODE_ONLINE = 2
+    MODE_LOCAL = 1
 } GameMode;
 
 /* Top-level GUI screens. */
 typedef enum AppScreen {
     SCREEN_MENU = 0,
     SCREEN_PLAY = 1,
-    SCREEN_LOBBY = 2,
-    SCREEN_SETTINGS = 3
+    SCREEN_SETTINGS = 2
 } AppScreen;
-
-/* Lobby view states for simplified online UX flow. */
-typedef enum LobbyView {
-    LOBBY_VIEW_HOME = 0,
-    LOBBY_VIEW_JOIN = 1,
-    LOBBY_VIEW_HOST = 2,
-    LOBBY_VIEW_ACTIVE = 3
-} LobbyView;
-
-/* Async online actions executed by background worker to keep UI responsive. */
-typedef enum OnlineAsyncAction {
-    ONLINE_ASYNC_NONE = 0,
-    ONLINE_ASYNC_ENTER_LOBBY = 1,
-    ONLINE_ASYNC_HOST_ROOM = 2,
-    ONLINE_ASYNC_JOIN_ROOM = 3,
-    ONLINE_ASYNC_RECONNECT_ROOM = 4
-} OnlineAsyncAction;
 
 /* Built-in visual themes exposed in the settings screen. */
 typedef enum ColorTheme {
@@ -75,7 +55,7 @@ typedef enum ColorTheme {
     THEME_OCEAN = 2
 } ColorTheme;
 
-/* Move flags used by move generation, validation, and networking. */
+/* Move flags used by move generation and validation. */
 typedef enum MoveFlags {
     MOVE_FLAG_NONE = 0,
     MOVE_FLAG_CAPTURE = 1 << 0,

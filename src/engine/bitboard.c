@@ -708,7 +708,7 @@ bool engine_is_square_attacked(const Position* pos, int square, Side by_side) {
     return false;
 }
 
-/* Piece lookup helper for GUI/debug/network validation paths. */
+/* Piece lookup helper for GUI and debug validation paths. */
 bool position_piece_at(const Position* pos, int square, Side* out_side, PieceType* out_piece) {
     if (!is_square_on_board(square)) {
         return false;

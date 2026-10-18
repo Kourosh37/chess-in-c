@@ -9,7 +9,7 @@
 CC ?= gcc
 TARGET ?= chess_app
 
-CFLAGS ?= -std=c11 -O2 -Wall -Wextra -Iinclude -Isrc/network
+CFLAGS ?= -std=c11 -O2 -Wall -Wextra -Iinclude
 LDFLAGS ?=
 LIBS ?=
 
@@ -31,10 +31,9 @@ SRC = \
 	src/gui/ui_widgets.c \
 	src/gui/screens/menu_screen.c \
 	src/gui/screens/play_screen.c \
-	src/gui/screens/lobby_screen.c \
 	src/gui/screens/settings_screen.c \
-	src/network/client.c \
-	src/network/matchmaker.c \
+	src/data/app_storage.c \
+	src/data/file_io.c \
 	src/data/secure_io.c
 
 OBJ = $(SRC:.c=.o)
@@ -42,7 +41,7 @@ OBJ = $(SRC:.c=.o)
 ifeq ($(OS),Windows_NT)
 	CFLAGS += $(THREAD_FLAGS)
 	LDFLAGS += $(THREAD_FLAGS) -mwindows
-	LIBS += -lraylib -lopengl32 -lgdi32 -lwinmm -lws2_32
+	LIBS += -lraylib -lopengl32 -lgdi32 -lwinmm -lcrypt32 -lshell32 -lole32 -luuid
 else
 	CFLAGS += $(THREAD_FLAGS)
 	LDFLAGS += $(THREAD_FLAGS)

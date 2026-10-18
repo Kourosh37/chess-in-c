@@ -3,6 +3,11 @@ set -euo pipefail
 
 VERSION="${1:-}"
 BUILD_DIR="${2:-build-release-linux}"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+SOURCE_DIR="$(cd -- "$SCRIPT_DIR/.." && pwd)"
+if [[ "$BUILD_DIR" != /* ]]; then
+  BUILD_DIR="$SOURCE_DIR/$BUILD_DIR"
+fi
 
 if [[ -z "$VERSION" ]]; then
   echo "Usage: $0 <version> [build_dir]"
@@ -10,19 +15,10 @@ if [[ -z "$VERSION" ]]; then
   exit 1
 fi
 
-cmake -S . -B "$BUILD_DIR" -G Ninja -DCHESS_RELEASE_VERSION="$VERSION"
+cmake -S "$SOURCE_DIR" -B "$BUILD_DIR" -G Ninja -DCMAKE_BUILD_TYPE=Release -DCHESS_RELEASE_VERSION="$VERSION"
+cmake --build "$BUILD_DIR"
+ctest --test-dir "$BUILD_DIR" --output-on-failure
 cmake --build "$BUILD_DIR" --target chess_linux_release
 
-ARCH="$(uname -m)"
-case "$ARCH" in
-  x86_64|amd64) ARCH_LABEL="x64" ;;
-  aarch64|arm64) ARCH_LABEL="arm64" ;;
-  *) ARCH_LABEL="$ARCH" ;;
-esac
-
 echo
-echo "Linux release package created:"
-echo "  $BUILD_DIR/release/chess-linux-${ARCH_LABEL}-v${VERSION}.run"
-echo "  $BUILD_DIR/release/chess-linux-${ARCH_LABEL}-v${VERSION}.run.sha256"
-echo "  $BUILD_DIR/release/chess-linux-${ARCH_LABEL}-v${VERSION}.tar.gz"
-echo "  $BUILD_DIR/release/chess-linux-${ARCH_LABEL}-v${VERSION}.tar.gz.sha256"
+echo "Linux release packages created in: $BUILD_DIR/release"

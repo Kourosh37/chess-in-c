@@ -47,7 +47,7 @@ jobs:
       - name: Ensure tools
         shell: pwsh
         run: |
-          choco install ninja 7zip innosetup -y --no-progress
+          choco install ninja innosetup -y --no-progress
 
       - name: Configure
         shell: pwsh
@@ -63,63 +63,39 @@ jobs:
             "-DCHESS_WINDOWS_PORTABLE_RUNTIME:BOOL=ON" `
             "-DCHESS_WINDOWS_FORCE_STATIC_GNU_RUNTIME:BOOL=OFF"
 
+      - name: Build and test
+        shell: pwsh
+        run: |
+          cmake --build build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ctest --test-dir build --output-on-failure
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Build windows release artifacts
         shell: pwsh
         run: cmake --build build --target chess_onefile
 
-      - name: Normalize artifact names and verify checksum
+      - name: Test installer and settings across reinstall
         shell: pwsh
         run: |
           $version = "${{ steps.version.outputs.value }}"
-          $releaseDir = "build/release"
-          $exePath = Join-Path $releaseDir "chess-windows-x64-v$version.exe"
+          ./tools/test_windows_installer.ps1 `
+            -Installer "build/release/chess-windows-x64-v$version.exe" `
+            -StorageTests "build/chess_storage_tests.exe" `
+            -TestRoot "$env:RUNNER_TEMP/chess-installer-tests"
+
+      - name: Verify packaged checksum
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.value }}"
+          $exePath = "build/release/chess-windows-x64-v$version.exe"
           $shaPath = "$exePath.sha256"
-          $sourceExe = $null
-
-          if (Test-Path -LiteralPath $exePath) {
-            $sourceExe = $exePath
+          if (-not (Test-Path -LiteralPath $exePath) -or -not (Test-Path -LiteralPath $shaPath)) {
+            throw "Missing installer or checksum: $exePath"
           }
-          if (-not $sourceExe) {
-            $versionedMatches = @()
-            if (Test-Path -LiteralPath $releaseDir) {
-              $versionedMatches = @(Get-ChildItem -LiteralPath $releaseDir -File -Filter "chess-windows-*-v$version.exe")
-            }
-
-            if ($versionedMatches.Count -eq 1) {
-              $sourceExe = $versionedMatches[0].FullName
-            } else {
-              $latestExe = Join-Path $releaseDir "chess.exe"
-              if (Test-Path -LiteralPath $latestExe) {
-                $sourceExe = $latestExe
-              }
-            }
-          }
-
-          if (-not $sourceExe) {
-            Write-Error "Missing expected artifact: $exePath"
-            if (Test-Path -LiteralPath $releaseDir) {
-              Write-Host "Files under ${releaseDir}:"
-              Get-ChildItem -LiteralPath $releaseDir -File | Select-Object Name, Length | Format-Table -AutoSize
-            } else {
-              Write-Host "Release directory does not exist: $releaseDir"
-            }
-            exit 1
-          }
-
-          if ((Resolve-Path -LiteralPath $sourceExe).Path -ne (Resolve-Path -LiteralPath $exePath -ErrorAction SilentlyContinue)?.Path) {
-            Copy-Item -LiteralPath $sourceExe -Destination $exePath -Force
-          }
-
-          $actual = (Get-FileHash -LiteralPath $exePath -Algorithm SHA256).Hash.ToLowerInvariant()
-          $exeName = Split-Path -Leaf $exePath
-          Set-Content -LiteralPath $shaPath -Value "$actual *$exeName"
-
-          $line = (Get-Content -LiteralPath $shaPath | Select-Object -First 1).Trim()
-          $expected = ($line -split '\s+')[0].ToLowerInvariant()
-          if ($actual -ne $expected) {
-            Write-Error "SHA256 mismatch after normalization. expected=$expected actual=$actual"
-            exit 1
-          }
+          $expected = ((Get-Content -LiteralPath $shaPath | Select-Object -First 1) -split '\s+')[0]
+          $actual = (Get-FileHash -LiteralPath $exePath -Algorithm SHA256).Hash
+          if ($actual -ne $expected) { throw "Installer SHA256 mismatch." }
 
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v4

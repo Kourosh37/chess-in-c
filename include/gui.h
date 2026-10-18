@@ -48,9 +48,7 @@ extern "C" {
 bool gui_button(Rectangle bounds, const char* label);
 bool gui_button_submit(Rectangle bounds, const char* label, bool submit_hotkey);
 bool gui_slider_float(Rectangle bounds, float* value, float min_value, float max_value);
-void gui_input_box(Rectangle bounds, char* buffer, int capacity, bool active);
 void gui_widgets_begin_frame(void);
-void gui_draw_input_overlays(void);
 bool gui_font_init(void);
 void gui_font_shutdown(void);
 void gui_draw_text(const char* text, int pos_x, int pos_y, int font_size, Color color);
@@ -74,7 +72,6 @@ void gui_draw_background(void);
 /* Top-level screen render/update handlers. */
 void gui_screen_menu(struct ChessApp* app);
 void gui_screen_play(struct ChessApp* app);
-void gui_screen_lobby(struct ChessApp* app);
 void gui_screen_settings(struct ChessApp* app);
 
 #ifdef __cplusplus

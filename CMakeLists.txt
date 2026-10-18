@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.21)
 
 project(ChessProject VERSION 1.1.0 LANGUAGES C)
 
@@ -11,11 +11,11 @@ set(CMAKE_C_EXTENSIONS OFF)
 
 option(CHESS_FETCH_RAYLIB "Fetch raylib automatically when not installed" ON)
 option(CHESS_ENABLE_WARNINGS "Enable common warning flags" ON)
-option(CHESS_BUILD_LEGACY_RELAY_SERVER "Build legacy standalone relay server binary" OFF)
 option(CHESS_BUILD_APP "Build GUI application target" ON)
 option(CHESS_BUILD_ENGINE_BENCH "Build engine benchmark CLI target" ON)
 option(CHESS_ENABLE_ENGINE_TESTS "Register engine bench tests in CTest" ON)
-option(CHESS_WINDOWS_PORTABLE_RUNTIME "Prefer static runtime linkage on Windows for portable release artifacts" OFF)
+option(CHESS_BUILD_STORAGE_TESTS "Build settings persistence regression tests" ON)
+option(CHESS_WINDOWS_PORTABLE_RUNTIME "Prefer static runtime linkage on Windows for portable release artifacts" ON)
 option(CHESS_WINDOWS_FORCE_STATIC_GNU_RUNTIME "Force fully static GNU runtime linkage on Windows (advanced)" OFF)
 set(CHESS_RELEASE_VERSION "${PROJECT_VERSION}" CACHE STRING "Version label used for release package naming")
 set(_chess_default_release_arch "x64")
@@ -29,6 +29,11 @@ if(CMAKE_SYSTEM_PROCESSOR)
         set(_chess_default_release_arch "${_chess_proc_lower}")
     endif()
 endif()
+if(WIN32 AND CMAKE_C_COMPILER_ARCHITECTURE_ID MATCHES "^[Aa][Rr][Mm]64$")
+    set(_chess_default_release_arch "arm64")
+elseif(WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 4)
+    set(_chess_default_release_arch "x86")
+endif()
 set(CHESS_RELEASE_ARCH "${_chess_default_release_arch}" CACHE STRING "Architecture label used for release package naming")
 
 if(WIN32 AND MSVC AND CHESS_WINDOWS_PORTABLE_RUNTIME)
@@ -37,11 +42,17 @@ if(WIN32 AND MSVC AND CHESS_WINDOWS_PORTABLE_RUNTIME)
 endif()
 
 find_package(Threads REQUIRED)
+include(CTest)
 
 set(CHESS_ENGINE_CORE_SOURCES
     src/engine/bitboard.c
     src/engine/movegen.c
     src/engine/search.c
+)
+set(CHESS_STORAGE_SOURCES
+    src/data/app_storage.c
+    src/data/file_io.c
+    src/data/secure_io.c
 )
 
 # ------------------------------------------------------------
@@ -84,21 +95,21 @@ if(CHESS_BUILD_APP)
         src/gui/ui_widgets.c
         src/gui/screens/menu_screen.c
         src/gui/screens/play_screen.c
-        src/gui/screens/lobby_screen.c
         src/gui/screens/settings_screen.c
-        src/network/client.c
-        src/network/matchmaker.c
-        src/data/secure_io.c
+        ${CHESS_STORAGE_SOURCES}
     )
 
     add_executable(chess_app ${CHESS_SOURCES})
 
-    target_include_directories(chess_app PRIVATE include src/network)
+    target_include_directories(chess_app PRIVATE include)
     target_link_libraries(chess_app PRIVATE raylib Threads::Threads)
+    if(MSVC)
+        target_compile_options(chess_app PRIVATE /experimental:c11atomics)
+    endif()
 
     if(CHESS_ENABLE_WARNINGS)
         if(MSVC)
-            target_compile_options(chess_app PRIVATE /W4 /experimental:c11atomics)
+            target_compile_options(chess_app PRIVATE /W4)
         else()
             target_compile_options(chess_app PRIVATE -Wall -Wextra -Wpedantic)
         endif()
@@ -144,32 +155,26 @@ if(WIN32 AND CHESS_BUILD_APP)
 
     # Build as a GUI app (no console window) on Windows.
     set_target_properties(chess_app PROPERTIES WIN32_EXECUTABLE TRUE)
-    target_link_libraries(chess_app PRIVATE ws2_32 gdi32 winmm opengl32 crypt32)
+    target_link_libraries(chess_app PRIVATE gdi32 winmm opengl32 crypt32 shell32 ole32 uuid)
 endif()
 
 # ------------------------------------------------------------
-# One-file portable package target (Windows self-extracting EXE)
+# Windows installer target (Inno Setup)
 # ------------------------------------------------------------
 if(WIN32 AND CHESS_BUILD_APP)
-    find_program(CHESS_7Z_EXE
-        NAMES 7z 7z.exe
-        HINTS
-            "$ENV{ProgramFiles}/7-Zip"
-            "$ENV{ProgramW6432}/7-Zip"
-    )
     find_program(CHESS_ISCC_EXE
         NAMES iscc iscc.exe
         HINTS
+            "$ENV{ProgramW6432}/Inno Setup 7"
+            "$ENV{ProgramFiles}/Inno Setup 7"
+            "C:/Program Files (x86)/Inno Setup 7"
             "$ENV{ProgramW6432}/Inno Setup 6"
             "$ENV{ProgramFiles}/Inno Setup 6"
             "C:/Program Files (x86)/Inno Setup 6"
     )
 
-    if(NOT CHESS_7Z_EXE)
-        message(WARNING "7z.exe was not found. Install 7-Zip (example: winget install --id 7zip.7zip).")
-    endif()
     if(NOT CHESS_ISCC_EXE)
-        message(WARNING "iscc.exe (Inno Setup) was not found. Install Inno Setup 6 for installer packaging.")
+        message(STATUS "Inno Setup not found; chess_onefile requires Inno Setup 6.3 or newer.")
     endif()
 
     add_custom_target(chess_onefile
@@ -178,9 +183,14 @@ if(WIN32 AND CHESS_BUILD_APP)
             -DCHESS_SOURCE_ASSETS=${CMAKE_SOURCE_DIR}/assets
             -DCHESS_SOURCE_DIR=${CMAKE_SOURCE_DIR}
             -DCHESS_OUT_DIR=${CMAKE_BINARY_DIR}/release
-            -DCHESS_7Z_EXE=${CHESS_7Z_EXE}
             -DCHESS_ISCC_EXE=${CHESS_ISCC_EXE}
             -DCHESS_RELEASE_VERSION=${CHESS_RELEASE_VERSION}
+            -DCHESS_RELEASE_ARCH=${CHESS_RELEASE_ARCH}
+            -DCHESS_COMPILER_ID=${CMAKE_C_COMPILER_ID}
+            -DCHESS_COMPILER=${CMAKE_C_COMPILER}
+            -DCHESS_OBJDUMP=${CMAKE_OBJDUMP}
+            -DCHESS_PORTABLE_RUNTIME=${CHESS_WINDOWS_PORTABLE_RUNTIME}
+            -DCHESS_RUNTIME_DLLS=$<JOIN:$<TARGET_RUNTIME_DLLS:chess_app>,|>
             -P ${CMAKE_SOURCE_DIR}/cmake/build_windows_installer.cmake
         DEPENDS chess_app
         COMMENT "Building Windows installer (one-file) for Chess"
@@ -196,6 +206,7 @@ if(UNIX AND NOT APPLE AND CHESS_BUILD_APP)
         COMMAND ${CMAKE_COMMAND}
             -DCHESS_APP_EXE=$<TARGET_FILE:chess_app>
             -DCHESS_SOURCE_ASSETS=${CMAKE_SOURCE_DIR}/assets
+            -DCHESS_SOURCE_DIR=${CMAKE_SOURCE_DIR}
             -DCHESS_OUT_DIR=${CMAKE_BINARY_DIR}/release
             -DCHESS_RELEASE_VERSION=${CHESS_RELEASE_VERSION}
             -DCHESS_RELEASE_ARCH=${CHESS_RELEASE_ARCH}
@@ -230,7 +241,6 @@ if(CHESS_BUILD_ENGINE_BENCH)
     endif()
 endif()
 
-include(CTest)
 if(BUILD_TESTING AND CHESS_BUILD_ENGINE_BENCH AND CHESS_ENABLE_ENGINE_TESTS)
     add_test(
         NAME engine_bench_quick
@@ -238,16 +248,28 @@ if(BUILD_TESTING AND CHESS_BUILD_ENGINE_BENCH AND CHESS_ENABLE_ENGINE_TESTS)
     )
 endif()
 
-# ------------------------------------------------------------
-# Optional legacy relay server executable (disabled by default)
-# ------------------------------------------------------------
-if(CHESS_BUILD_LEGACY_RELAY_SERVER)
-    add_executable(chess_relay_server
-        src/network/relay_server.c
-        src/network/matchmaker.c
+if(BUILD_TESTING AND CHESS_BUILD_STORAGE_TESTS)
+    add_executable(chess_storage_tests
+        tools/storage_tests.c
+        src/core/game_state.c
+        ${CHESS_ENGINE_CORE_SOURCES}
+        ${CHESS_STORAGE_SOURCES}
     )
-    target_include_directories(chess_relay_server PRIVATE include src/network)
+    target_include_directories(chess_storage_tests PRIVATE include)
+    target_link_libraries(chess_storage_tests PRIVATE Threads::Threads)
     if(WIN32)
-        target_link_libraries(chess_relay_server PRIVATE ws2_32)
+        target_link_libraries(chess_storage_tests PRIVATE crypt32 shell32 ole32 uuid)
     endif()
+    if(CHESS_ENABLE_WARNINGS)
+        if(MSVC)
+            target_compile_options(chess_storage_tests PRIVATE /W4)
+        else()
+            target_compile_options(chess_storage_tests PRIVATE -Wall -Wextra -Wpedantic)
+        endif()
+    endif()
+    add_test(NAME settings_persistence
+        COMMAND ${CMAKE_COMMAND}
+            -DCHESS_STORAGE_TEST_EXE=$<TARGET_FILE:chess_storage_tests>
+            -DCHESS_TEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/storage-tests
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/tools/run_storage_tests.cmake)
 endif()

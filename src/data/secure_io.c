@@ -1,4 +1,5 @@
 #include "secure_io.h"
+#include "file_io.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -11,7 +12,7 @@
 #endif
 
 #define SECURE_IO_MAGIC 0x314F5343U /* CSO1 */
-#define SECURE_IO_VERSION 1U
+#define SECURE_IO_VERSION 2U
 #define SECURE_IO_METHOD_DPAPI 1U
 #define SECURE_IO_METHOD_XOR 2U
 
@@ -25,78 +26,13 @@ typedef struct SecureIoHeader {
 } SecureIoHeader;
 #pragma pack(pop)
 
-static bool read_raw_file(const char* path, uint8_t** out_data, size_t* out_size) {
-    FILE* file;
-    long length;
-    uint8_t* data = NULL;
+static char g_error[256];
 
-    if (path == NULL || out_data == NULL || out_size == NULL) {
-        return false;
-    }
+const char* secure_io_last_error(void) { return g_error; }
 
-    *out_data = NULL;
-    *out_size = 0;
-
-    file = fopen(path, "rb");
-    if (file == NULL) {
-        return false;
-    }
-
-    if (fseek(file, 0, SEEK_END) != 0) {
-        fclose(file);
-        return false;
-    }
-
-    length = ftell(file);
-    if (length < 0) {
-        fclose(file);
-        return false;
-    }
-
-    if (fseek(file, 0, SEEK_SET) != 0) {
-        fclose(file);
-        return false;
-    }
-
-    if (length > 0) {
-        data = (uint8_t*)malloc((size_t)length);
-        if (data == NULL) {
-            fclose(file);
-            return false;
-        }
-
-        if (fread(data, 1, (size_t)length, file) != (size_t)length) {
-            free(data);
-            fclose(file);
-            return false;
-        }
-    }
-
-    fclose(file);
-    *out_data = data;
-    *out_size = (size_t)length;
-    return true;
-}
-
-static bool write_raw_file(const char* path, const void* data, size_t size) {
-    FILE* file;
-
-    if (path == NULL || (data == NULL && size > 0)) {
-        return false;
-    }
-
-    file = fopen(path, "wb");
-    if (file == NULL) {
-        return false;
-    }
-
-    if (size > 0 && fwrite(data, 1, size, file) != size) {
-        fclose(file);
-        return false;
-    }
-
-    fclose(file);
-    return true;
+static bool invalid(const char* message) {
+    snprintf(g_error, sizeof(g_error), "%s", message);
+    return false;
 }
 
 static uint8_t xor_transform_byte(uint8_t value, size_t index) {
@@ -106,6 +42,16 @@ static uint8_t xor_transform_byte(uint8_t value, size_t index) {
     };
     uint8_t step = (uint8_t)(index * 29U + 11U);
     return (uint8_t)(value ^ k_key[index & 15U] ^ step);
+}
+
+/* Detect accidental corruption in the non-Windows obfuscation format. */
+static uint32_t checksum(const uint8_t* data, size_t size) {
+    uint32_t crc = 0xFFFFFFFFU;
+    for (size_t i = 0; i < size; ++i) {
+        crc ^= data[i];
+        for (int bit = 0; bit < 8; ++bit) crc = (crc >> 1) ^ (0xEDB88320U & (0U - (crc & 1U)));
+    }
+    return ~crc;
 }
 
 void secure_io_free(void* data) {
@@ -120,8 +66,9 @@ bool secure_io_write_file(const char* path, const void* data, size_t size) {
     size_t final_size;
     bool ok;
 
-    if (path == NULL || (data == NULL && size > 0) || size > 0xFFFFFFFFU) {
-        return false;
+    g_error[0] = '\0';
+    if (path == NULL || (data == NULL && size > 0) || size > 16U * 1024U * 1024U) {
+        return invalid("Could not allocate or encode settings data.");
     }
 
 #ifdef _WIN32
@@ -139,14 +86,14 @@ bool secure_io_write_file(const char* path, const void* data, size_t size) {
                               NULL,
                               CRYPTPROTECT_UI_FORBIDDEN,
                               &out_blob)) {
-            return false;
+            return invalid("Windows could not encrypt the settings.");
         }
 
         out_payload_size = (size_t)out_blob.cbData;
         out_payload = (uint8_t*)malloc(out_payload_size);
         if (out_payload == NULL) {
             LocalFree(out_blob.pbData);
-            return false;
+            return invalid("Could not allocate or encode settings data.");
         }
         if (out_payload_size > 0) {
             memcpy(out_payload, out_blob.pbData, out_payload_size);
@@ -155,20 +102,24 @@ bool secure_io_write_file(const char* path, const void* data, size_t size) {
         header.method = SECURE_IO_METHOD_DPAPI;
     }
 #else
-    out_payload_size = size;
+    out_payload_size = size + sizeof(uint32_t);
     out_payload = (uint8_t*)malloc(out_payload_size > 0 ? out_payload_size : 1U);
     if (out_payload == NULL) {
-        return false;
+        return invalid("Could not allocate or encode settings data.");
     }
-    for (size_t i = 0; i < out_payload_size; ++i) {
+    for (size_t i = 0; i < size; ++i) {
         out_payload[i] = xor_transform_byte(((const uint8_t*)data)[i], i);
+    }
+    {
+        uint32_t crc = checksum(data, size);
+        memcpy(out_payload + size, &crc, sizeof(crc));
     }
     header.method = SECURE_IO_METHOD_XOR;
 #endif
 
-    if (out_payload_size > 0xFFFFFFFFU) {
+    if (out_payload_size > 16U * 1024U * 1024U) {
         free(out_payload);
-        return false;
+        return invalid("Could not allocate or encode settings data.");
     }
 
     header.magic = SECURE_IO_MAGIC;
@@ -180,7 +131,7 @@ bool secure_io_write_file(const char* path, const void* data, size_t size) {
     final_blob = (uint8_t*)malloc(final_size > 0 ? final_size : 1U);
     if (final_blob == NULL) {
         free(out_payload);
-        return false;
+        return invalid("Could not allocate or encode settings data.");
     }
 
     memcpy(final_blob, &header, sizeof(header));
@@ -188,36 +139,34 @@ bool secure_io_write_file(const char* path, const void* data, size_t size) {
         memcpy(final_blob + sizeof(header), out_payload, out_payload_size);
     }
 
-    ok = write_raw_file(path, final_blob, final_size);
+    ok = file_io_write_atomic(path, final_blob, final_size);
+    if (!ok) invalid(file_io_last_error());
     free(final_blob);
     free(out_payload);
     return ok;
 }
 
-bool secure_io_read_file(const char* path, void** out_data, size_t* out_size) {
-    uint8_t* raw = NULL;
-    size_t raw_size = 0;
-    bool has_header = false;
-
-    if (path == NULL || out_data == NULL || out_size == NULL) {
-        return false;
-    }
+static bool decode_container(uint8_t* raw, size_t raw_size, void** out_data, size_t* out_size) {
+    uint32_t magic = 0;
 
     *out_data = NULL;
     *out_size = 0;
 
-    if (!read_raw_file(path, &raw, &raw_size)) {
-        return false;
-    }
-
-    if (raw_size >= sizeof(SecureIoHeader)) {
+    if (raw_size >= sizeof(magic)) memcpy(&magic, raw, sizeof(magic));
+    if (magic == SECURE_IO_MAGIC) {
         SecureIoHeader header;
+        if (raw_size < sizeof(header)) {
+            free(raw);
+            return invalid("Settings container is truncated.");
+        }
         memcpy(&header, raw, sizeof(header));
-        has_header = (header.magic == SECURE_IO_MAGIC &&
-                      header.version == SECURE_IO_VERSION &&
-                      sizeof(SecureIoHeader) + (size_t)header.payload_size <= raw_size);
+        if ((header.version != 1U && header.version != SECURE_IO_VERSION) || header.reserved != 0 ||
+            (size_t)header.payload_size != raw_size - sizeof(header)) {
+            free(raw);
+            return invalid("Settings container has an invalid header or length.");
+        }
 
-        if (has_header) {
+        {
             const uint8_t* payload = raw + sizeof(SecureIoHeader);
             size_t payload_size = (size_t)header.payload_size;
 
@@ -238,14 +187,14 @@ bool secure_io_read_file(const char* path, void** out_data, size_t* out_size) {
                                         CRYPTPROTECT_UI_FORBIDDEN,
                                         &out_blob)) {
                     free(raw);
-                    return false;
+                    return invalid("Windows could not decrypt these settings for the current user.");
                 }
 
                 out_copy = (uint8_t*)malloc((size_t)out_blob.cbData > 0 ? (size_t)out_blob.cbData : 1U);
                 if (out_copy == NULL) {
                     LocalFree(out_blob.pbData);
                     free(raw);
-                    return false;
+                    return invalid("Could not allocate or encode settings data.");
                 }
 
                 if (out_blob.cbData > 0) {
@@ -261,28 +210,66 @@ bool secure_io_read_file(const char* path, void** out_data, size_t* out_size) {
 #endif
 
             if (header.method == SECURE_IO_METHOD_XOR) {
-                uint8_t* out_copy = (uint8_t*)malloc(payload_size > 0 ? payload_size : 1U);
+                size_t decoded_size = payload_size;
+                uint8_t* out_copy;
+                if (header.version >= 2U) {
+                    if (payload_size < sizeof(uint32_t)) { free(raw); return invalid("Settings checksum is missing."); }
+                    decoded_size -= sizeof(uint32_t);
+                }
+                out_copy = (uint8_t*)malloc(decoded_size > 0 ? decoded_size : 1U);
                 if (out_copy == NULL) {
                     free(raw);
-                    return false;
+                    return invalid("Could not allocate or encode settings data.");
                 }
 
-                for (size_t i = 0; i < payload_size; ++i) {
+                for (size_t i = 0; i < decoded_size; ++i) {
                     out_copy[i] = xor_transform_byte(payload[i], i);
                 }
 
+                if (header.version >= 2U) {
+                    uint32_t expected;
+                    memcpy(&expected, payload + decoded_size, sizeof(expected));
+                    if (checksum(out_copy, decoded_size) != expected) {
+                        free(out_copy);
+                        free(raw);
+                        return invalid("Settings checksum does not match.");
+                    }
+                }
                 *out_data = out_copy;
-                *out_size = payload_size;
+                *out_size = decoded_size;
                 free(raw);
                 return true;
             }
 
             free(raw);
-            return false;
+            return invalid("Settings encryption method is not supported.");
         }
     }
 
     *out_data = raw;
     *out_size = raw_size;
     return true;
+}
+
+/* Older migration code sometimes encrypted an already encrypted file. */
+bool secure_io_read_file(const char* path, void** out_data, size_t* out_size) {
+    uint8_t* raw = NULL;
+    size_t raw_size = 0;
+    g_error[0] = '\0';
+    if (path == NULL || out_data == NULL || out_size == NULL) return invalid("Invalid settings read request.");
+    *out_data = NULL;
+    *out_size = 0;
+    if (!file_io_read(path, (void**)&raw, &raw_size)) return invalid(file_io_last_error());
+    for (int layer = 0; layer < 4; ++layer) {
+        uint32_t magic = 0;
+        if (!decode_container(raw, raw_size, out_data, out_size)) return false;
+        if (*out_size >= sizeof(magic)) memcpy(&magic, *out_data, sizeof(magic));
+        if (magic != SECURE_IO_MAGIC) return true;
+        raw = *out_data;
+        raw_size = *out_size;
+        *out_data = NULL;
+        *out_size = 0;
+    }
+    free(raw);
+    return invalid("Too many nested settings containers.");
 }

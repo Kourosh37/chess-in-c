@@ -13,7 +13,7 @@
 extern "C" {
 #endif
 
-/* Writes one buffer to path using encrypted container format. */
+/* Atomically writes a UTF-8 path. DPAPI on Windows, checksummed obfuscation elsewhere. */
 bool secure_io_write_file(const char* path, const void* data, size_t size);
 
 /* Reads one file and decrypts it when needed; legacy plain files are also accepted. */
@@ -21,6 +21,7 @@ bool secure_io_read_file(const char* path, void** out_data, size_t* out_size);
 
 /* Frees buffers returned by secure_io_read_file(). */
 void secure_io_free(void* data);
+const char* secure_io_last_error(void);
 
 #ifdef __cplusplus
 }

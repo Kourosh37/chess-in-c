@@ -268,7 +268,6 @@ void gui_screen_settings(struct ChessApp* app) {
     Rectangle theme_row;
     Rectangle touch_move_row;
     Rectangle timer_row;
-    Rectangle online_name_row;
     Rectangle toggle_btn;
     Rectangle sfx_row;
     Rectangle menu_music_row;
@@ -317,8 +316,13 @@ void gui_screen_settings(struct ChessApp* app) {
     DrawRectangleRoundedLinesEx(panel, 0.07f, 8, 1.4f, palette->panel_border);
 
     gui_draw_text("Settings", (int)panel.x + 30, (int)panel.y + 24, 46, palette->text_primary);
+    if (app->settings_status[0] != '\0') {
+        draw_text_fit(app->settings_status, (int)panel.x + 30, (int)panel.y + 80,
+                      16, (int)panel.width - 60, (Color){176, 50, 40, 255});
+    }
 
     if (gui_button(back_btn, "Back")) {
+        if (app->settings_dirty) app_save_settings(app);
         app->screen = SCREEN_MENU;
     }
 
@@ -343,12 +347,6 @@ void gui_screen_settings(struct ChessApp* app) {
     timer_row = (Rectangle){
         left_card.x + card_inner,
         touch_move_row.y + row_h + row_gap,
-        left_card.width - card_inner * 2.0f,
-        row_h
-    };
-    online_name_row = (Rectangle){
-        left_card.x + card_inner,
-        timer_row.y + row_h + row_gap,
         left_card.width - card_inner * 2.0f,
         row_h
     };
@@ -527,52 +525,6 @@ void gui_screen_settings(struct ChessApp* app) {
                 dirty = true;
             }
         }
-
-        {
-            Rectangle name_input = {
-                online_name_row.x + 14.0f,
-                online_name_row.y + 30.0f,
-                online_name_row.width - 28.0f,
-                online_name_row.height - 38.0f
-            };
-            char before_name[PLAYER_NAME_MAX + 1];
-
-            DrawRectangleRounded(online_name_row, 0.10f, 8, Fade(palette->panel, 0.92f));
-            DrawRectangleRoundedLinesEx(online_name_row, 0.10f, 8, 1.0f, palette->panel_border);
-            gui_draw_text("Online Name",
-                          (int)online_name_row.x + 16,
-                          (int)online_name_row.y + 10,
-                          21,
-                          palette->text_primary);
-
-            if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) || IsMouseButtonPressed(MOUSE_RIGHT_BUTTON)) {
-                app->online_name_input_active = CheckCollisionPointRec(GetMousePosition(), name_input);
-            }
-
-            strncpy(before_name, app->online_name, PLAYER_NAME_MAX);
-            before_name[PLAYER_NAME_MAX] = '\0';
-
-            gui_input_box(name_input, app->online_name, PLAYER_NAME_MAX + 1, app->online_name_input_active);
-            if (strcmp(before_name, app->online_name) != 0) {
-                if (app->online_name[0] != '\0') {
-                    strncpy(app->profile.username, app->online_name, PLAYER_NAME_MAX);
-                    app->profile.username[PLAYER_NAME_MAX] = '\0';
-                } else {
-                    strncpy(app->profile.username, "Player", PLAYER_NAME_MAX);
-                    app->profile.username[PLAYER_NAME_MAX] = '\0';
-                }
-                dirty = true;
-            }
-
-            if (app->online_name[0] == '\0') {
-                draw_text_fit("Required for online games",
-                              (int)online_name_row.x + (int)online_name_row.width - 250,
-                              (int)online_name_row.y + 12,
-                              16,
-                              230,
-                              palette->text_secondary);
-            }
-        }
     }
 
     DrawRectangleRounded(right_card, 0.08f, 8, Fade(palette->panel_alt, 0.95f));
@@ -666,6 +618,6 @@ void gui_screen_settings(struct ChessApp* app) {
     }
 
     if (dirty) {
-        app_save_settings(app);
+        app_settings_changed(app);
     }
 }

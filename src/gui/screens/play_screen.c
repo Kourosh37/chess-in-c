@@ -339,7 +339,6 @@ static void draw_move_log_panel(ChessApp* app, Rectangle panel) {
 /* Draws a blocking confirmation dialog when user attempts to leave a running game. */
 static void draw_leave_confirm_dialog(ChessApp* app) {
     const GuiPalette* palette = gui_palette();
-    bool online_mode = (app->mode == MODE_ONLINE && app->online_match_active);
     float sw = (float)GetScreenWidth();
     float sh = (float)GetScreenHeight();
     float panel_w = sw * 0.56f;
@@ -355,10 +354,8 @@ static void draw_leave_confirm_dialog(ChessApp* app) {
     float content_w;
     float text_y;
     float actions_y;
-    bool stack_online_buttons;
     Rectangle panel;
     Rectangle stay_btn;
-    Rectangle menu_btn;
     Rectangle leave_btn;
 
     if (panel_w < 360.0f) {
@@ -374,20 +371,15 @@ static void draw_leave_confirm_dialog(ChessApp* app) {
     title_size = (panel_w < 460.0f) ? 30.0f : 34.0f;
     body_size = (panel_w < 460.0f) ? 18.0f : 20.0f;
     body_line_h = body_size + 8.0f;
-    body_block_h = online_mode ? (body_line_h * 4.0f) : (body_line_h * 3.0f);
+    body_block_h = body_line_h * 3.0f;
     button_h = (panel_w < 460.0f) ? 42.0f : 46.0f;
     button_gap = (panel_w < 460.0f) ? 10.0f : 12.0f;
-    stack_online_buttons = online_mode && panel_w < 640.0f;
 
-    if (online_mode) {
-        actions_h = stack_online_buttons ? (button_h * 3.0f + button_gap * 2.0f) : button_h;
-    } else {
-        actions_h = button_h;
-    }
+    actions_h = button_h;
 
     panel_h = 24.0f + title_size + 14.0f + body_block_h + 20.0f + actions_h + 20.0f;
-    if (panel_h < (online_mode ? 292.0f : 244.0f)) {
-        panel_h = online_mode ? 292.0f : 244.0f;
+    if (panel_h < 244.0f) {
+        panel_h = 244.0f;
     }
     if (panel_h > sh - 20.0f) {
         panel_h = sh - 20.0f;
@@ -410,33 +402,7 @@ static void draw_leave_confirm_dialog(ChessApp* app) {
 
     gui_draw_text("Leave Current Game?", (int)content_x, (int)panel.y + 24, (int)title_size, palette->text_primary);
 
-    if (online_mode) {
-        int lines_used = 0;
-        lines_used += draw_text_wrap("Menu (Keep Match): keep match in background.",
-                                     (int)content_x,
-                                     (int)text_y,
-                                     (int)body_size,
-                                     (int)content_w,
-                                     (int)body_line_h,
-                                     3,
-                                     palette->text_secondary);
-        lines_used += draw_text_wrap("Resume later from Active Games.",
-                                     (int)content_x,
-                                     (int)text_y + lines_used * (int)body_line_h,
-                                     (int)body_size,
-                                     (int)content_w,
-                                     (int)body_line_h,
-                                     2,
-                                     palette->text_secondary);
-        draw_text_wrap("Leave Match: notify opponent and end this match.",
-                       (int)content_x,
-                       (int)text_y + lines_used * (int)body_line_h,
-                       (int)body_size,
-                       (int)content_w,
-                       (int)body_line_h,
-                       3,
-                       palette->text_secondary);
-    } else {
+    {
         int lines_used = 0;
         lines_used += draw_text_wrap("If you leave now, this match will be closed.",
                                      (int)content_x,
@@ -458,20 +424,7 @@ static void draw_leave_confirm_dialog(ChessApp* app) {
 
     actions_y = panel.y + panel.height - 20.0f - actions_h;
 
-    if (online_mode && stack_online_buttons) {
-        stay_btn = (Rectangle){content_x, actions_y, content_w, button_h};
-        menu_btn = (Rectangle){content_x, actions_y + button_h + button_gap, content_w, button_h};
-        leave_btn = (Rectangle){content_x, actions_y + (button_h + button_gap) * 2.0f, content_w, button_h};
-    } else if (online_mode) {
-        float available = content_w - button_gap * 2.0f;
-        float stay_w = available * 0.22f;
-        float leave_w = available * 0.26f;
-        float menu_w = available - stay_w - leave_w;
-
-        stay_btn = (Rectangle){content_x, actions_y, stay_w, button_h};
-        menu_btn = (Rectangle){stay_btn.x + stay_btn.width + button_gap, actions_y, menu_w, button_h};
-        leave_btn = (Rectangle){menu_btn.x + menu_btn.width + button_gap, actions_y, leave_w, button_h};
-    } else {
+    {
         float each = (content_w - button_gap) * 0.5f;
         stay_btn = (Rectangle){content_x, actions_y, each, button_h};
         leave_btn = (Rectangle){stay_btn.x + stay_btn.width + button_gap, actions_y, each, button_h};
@@ -481,112 +434,18 @@ static void draw_leave_confirm_dialog(ChessApp* app) {
         app->leave_confirm_open = false;
     }
 
-    if (online_mode) {
-        if (gui_button(menu_btn, "Menu (Keep Match)")) {
-            app_online_store_current_match(app);
-            app->screen = SCREEN_MENU;
-            app->leave_confirm_open = false;
-            app->has_selection = false;
-            app->selected_square = -1;
-            app->move_animating = false;
-            snprintf(app->online_runtime_status,
-                     sizeof(app->online_runtime_status),
-                     "Match running in background. Resume any time.");
-        }
-
-        if (gui_button_submit(leave_btn, "Leave Match", true)) {
-            app_online_end_match(app, true);
-            app->screen = SCREEN_MENU;
-            app->leave_confirm_open = false;
-            app->has_selection = false;
-            app->selected_square = -1;
-            app->move_animating = false;
-        }
-    } else {
-        if (gui_button_submit(leave_btn, "Leave", true)) {
-            app->screen = SCREEN_MENU;
-            app->leave_confirm_open = false;
-            app->has_selection = false;
-            app->selected_square = -1;
-            app->ai_thinking = false;
-            app->move_animating = false;
-        }
-    }
-}
-
-/* Shows modal notification when opponent leaves an online match. */
-static void draw_online_leave_notice_dialog(ChessApp* app) {
-    const GuiPalette* palette = gui_palette();
-    float sw = (float)GetScreenWidth();
-    float sh = (float)GetScreenHeight();
-    float panel_w = sw * 0.44f;
-    float panel_h = 236.0f;
-    Rectangle panel;
-    Rectangle ok_btn;
-    int text_x;
-    int text_w;
-    int text_y;
-    int match_index;
-
-    if (panel_w < 420.0f) {
-        panel_w = 420.0f;
-    }
-    if (panel_w > 660.0f) {
-        panel_w = 660.0f;
-    }
-
-    panel = (Rectangle){
-        sw * 0.5f - panel_w * 0.5f,
-        sh * 0.5f - panel_h * 0.5f,
-        panel_w,
-        panel_h
-    };
-    ok_btn = (Rectangle){panel.x + panel.width - 152.0f, panel.y + panel.height - 60.0f, 128.0f, 40.0f};
-    text_x = (int)panel.x + 24;
-    text_w = (int)panel.width - 48;
-    text_y = (int)panel.y + 74;
-
-    DrawRectangle(0, 0, (int)sw, (int)sh, Fade(BLACK, 0.52f));
-    DrawRectangleRounded(panel, 0.08f, 8, Fade(palette->panel, 0.98f));
-    DrawRectangleRoundedLinesEx(panel, 0.08f, 8, 1.4f, palette->panel_border);
-
-    draw_text_fit(app->online_leave_notice_title[0] != '\0' ? app->online_leave_notice_title : "Match Ended",
-                  (int)panel.x + 24,
-                  (int)panel.y + 22,
-                  34,
-                  text_w,
-                  palette->text_primary);
-    draw_text_wrap(app->online_leave_notice_text[0] != '\0'
-                       ? app->online_leave_notice_text
-                       : "Your opponent left the match. Press OK to return to menu.",
-                   text_x,
-                   text_y,
-                   20,
-                   text_w,
-                   24,
-                   4,
-                   palette->text_secondary);
-
-    if (gui_button_submit(ok_btn, "OK", true)) {
-        match_index = app->online_leave_notice_match;
-        app->online_leave_notice_open = false;
-        app->online_leave_notice_match = -1;
-        app->online_leave_notice_title[0] = '\0';
-        app->online_leave_notice_text[0] = '\0';
-
-        if (match_index >= 0) {
-            app_online_close_match(app, match_index, false);
-        } else {
-            app->screen = SCREEN_MENU;
-        }
+    if (gui_button_submit(leave_btn, "Leave", true)) {
+        app->screen = SCREEN_MENU;
+        app->leave_confirm_open = false;
+        app->has_selection = false;
+        app->selected_square = -1;
+        app->ai_thinking = false;
+        app->move_animating = false;
     }
 }
 
 void gui_screen_play(struct ChessApp* app) {
     const GuiPalette* palette = gui_palette();
-    OnlineMatch* current_match = app_online_get(app, app->current_online_match);
-    bool online_connected = (current_match != NULL) && current_match->network.connected;
-    bool online_active = (current_match != NULL) && current_match->in_game;
     GuiPlayLayout layout = gui_get_play_layout();
     float capture_height = layout.sidebar.height * 0.26f;
     float top_capture_bottom = layout.sidebar.y + 70.0f + capture_height;
@@ -682,15 +541,10 @@ void gui_screen_play(struct ChessApp* app) {
             draw_text_fit("Mode: Single Player", content_x, y, line_size, content_w, palette->text_secondary);
         } else if (app->mode == MODE_LOCAL) {
             draw_text_fit("Mode: Local 2 Player", content_x, y, line_size, content_w, palette->text_secondary);
-        } else {
-            draw_text_fit("Mode: Online", content_x, y, line_size, content_w, palette->text_secondary);
         }
         y += line_size + 9;
 
-        if (app->mode == MODE_ONLINE) {
-            draw_text_fit(app->online_runtime_status, content_x, y, sub_size, content_w, palette->text_secondary);
-            y += sub_size + 8;
-        } else if (app->mode == MODE_SINGLE) {
+        if (app->mode == MODE_SINGLE) {
             char ai_line[96];
             snprintf(ai_line, sizeof(ai_line), "AI Difficulty: %d%%", app->ai_difficulty);
             draw_text_fit(ai_line, content_x, y, sub_size, content_w, palette->text_secondary);
@@ -736,17 +590,6 @@ void gui_screen_play(struct ChessApp* app) {
 
         if (app->mode == MODE_SINGLE && app->ai_thinking) {
             draw_text_fit("AI is thinking...", content_x, y, status_size, content_w, palette->accent);
-            y += status_size + 8;
-        } else if (app->mode == MODE_ONLINE && online_active && online_connected && !app_is_human_turn(app)) {
-            draw_text_fit("Waiting for opponent...", content_x, y, status_size, content_w, palette->accent);
-            y += status_size + 8;
-        } else if (app->mode == MODE_ONLINE && !online_connected) {
-            draw_text_fit("Opponent disconnected.",
-                          content_x,
-                          y,
-                          status_size,
-                          content_w,
-                          (Color){176, 78, 29, 255});
             y += status_size + 8;
         }
 
@@ -850,21 +693,14 @@ void gui_screen_play(struct ChessApp* app) {
         return;
     }
 
-    if (app->online_leave_notice_open) {
-        draw_online_leave_notice_dialog(app);
-        return;
-    }
-
     if (app->game_over) {
         return;
     }
 
     {
-        bool online_input_ok = (app->mode != MODE_ONLINE) || (online_active && online_connected);
         bool input_allowed = app_is_human_turn(app) &&
                              !app->move_animating &&
                              !gui_board_is_rotating() &&
-                             online_input_ok &&
                              !(app->mode == MODE_SINGLE && app->ai_thinking);
 
         if (!input_allowed) {
@@ -906,10 +742,6 @@ void gui_screen_play(struct ChessApp* app) {
                     app_apply_move(app, selected_move)) {
                     app->has_selection = false;
                     app->selected_square = -1;
-
-                    if (app->mode == MODE_ONLINE && current_match != NULL && current_match->network.connected) {
-                        network_client_send_move(&current_match->network, selected_move);
-                    }
                 } else if (square_has_turn_piece(app, square) && has_move_from(app, square)) {
                     if (!app->touch_move_enabled) {
                         app->selected_square = square;

@@ -53,7 +53,14 @@ jobs:
         shell: bash
         run: |
           cmake -S . -B build-release-linux -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
             -DCHESS_RELEASE_VERSION=${{ steps.version.outputs.value }}
+
+      - name: Build and test
+        shell: bash
+        run: |
+          cmake --build build-release-linux
+          ctest --test-dir build-release-linux --output-on-failure
 
       - name: Build linux release artifacts
         shell: bash

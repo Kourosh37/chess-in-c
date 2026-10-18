@@ -6,7 +6,6 @@ piece_capture.wav
 piece_promotion.wav
 king_check.wav
 game_over.wav
-lobby_join.wav
 game_victory.wav
 piece_select.wav
 

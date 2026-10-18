@@ -5,8 +5,8 @@ Modern C11 chess application with:
 - Bitboard engine
 - Raylib GUI
 - Stronger AI (iterative deepening + alpha-beta + TT)
-- Local/Online multiplayer
-- Persistent settings and resumable online sessions
+- Local 2-player multiplayer
+- Persistent settings and local player statistics
 
 ## Table of Contents
 
@@ -18,30 +18,28 @@ Modern C11 chess application with:
 6. [Linux Release Packaging](#linux-release-packaging)
 7. [One-File Packaging (Windows)](#one-file-packaging-windows)
 8. [How To Play](#how-to-play)
-9. [Online Mode](#online-mode)
-10. [AI Details](#ai-details)
-11. [Audio System](#audio-system)
-12. [Assets](#assets)
-13. [Settings and Saved Data](#settings-and-saved-data)
-14. [Architecture](#architecture)
-15. [Repository Layout](#repository-layout)
-16. [Known Limitations](#known-limitations)
-17. [Troubleshooting](#troubleshooting)
-18. [License](#license)
+9. [AI Details](#ai-details)
+10. [Audio System](#audio-system)
+11. [Assets](#assets)
+12. [Settings and Saved Data](#settings-and-saved-data)
+13. [Architecture](#architecture)
+14. [Repository Layout](#repository-layout)
+15. [Known Limitations](#known-limitations)
+16. [Troubleshooting](#troubleshooting)
+17. [License](#license)
 
 ## Overview
 
 `Chess` is a desktop chess game focused on practical gameplay quality and clean architecture.
-It supports single-player, local 2-player, and direct TCP online matches with invite codes.
+It supports single-player games against the AI and local 2-player games on one device.
 
 The app includes:
 
 - Responsive UI with scalable layout
-- Board rotation for local/online perspective
+- Board rotation between turns in local 2-player games
 - Move animations and move-history panel
 - Multiple visual themes
 - Split audio controls (SFX, menu music, game music)
-- Online active matches list with reconnect/resume flow
 
 ## Features
 
@@ -57,39 +55,24 @@ The app includes:
 
 - `Single Player`: human vs AI
 - `Local 2 Player`: two players on one device, rotating board
-- `Online`: host/join by invite code over direct TCP
 
 ### UI / UX
 
-- Dedicated screens: menu, play, lobby, settings
+- Dedicated screens: menu, play, settings
 - Enter-key submit behavior on confirm dialogs/buttons
-- Better input UX:
-  - `Ctrl+V`, `Shift+Insert` paste
-  - `Ctrl+C`, `Ctrl+X`, `Ctrl+A`
-  - Backspace/Delete repeat
-  - Right-click input context menu
 - Scrollable panels with mouse-wheel + draggable scrollbar thumb
 - Exit confirmation and leave-match confirmation flows
-
-### Online Session UX
-
-- Host and guest usernames shown in lobby
-- Copy button for invite code with visual feedback (`Copied`)
-- Match readiness and start flow
-- Active matches list (with timestamp, opponent, state)
-- Resume/reconnect from active matches
-- Session snapshots persisted between app runs
 
 ## Requirements
 
 - C compiler with C11 support (`gcc`, `clang`, MinGW, etc.)
-- CMake `>= 3.20`
+- CMake `>= 3.21`
 - Ninja (recommended)
 - Raylib `5.5` (auto-fetched by default via CMake)
 
 For `chess_onefile` packaging on Windows:
 
-- 7-Zip installed (`7z.exe` + `7z.sfx`)
+- Inno Setup `>= 6.3` (`ISCC.exe`), required only to build the installer
 
 For Linux release packaging:
 
@@ -139,8 +122,9 @@ chess_app.exe          # Windows
 | `CHESS_ENABLE_WARNINGS` | `ON` | Enable compiler warnings (`-Wall -Wextra -Wpedantic` / `/W4`) |
 | `CHESS_BUILD_APP` | `ON` | Build GUI app target (`chess_app`) |
 | `CHESS_BUILD_ENGINE_BENCH` | `ON` | Build engine benchmark target (`chess_engine_bench`) |
+| `CHESS_BUILD_STORAGE_TESTS` | `ON` | Build settings persistence regression tests (no GUI dependency) |
+| `CHESS_WINDOWS_PORTABLE_RUNTIME` | `ON` | Use the static MSVC runtime for Windows packages |
 | `CHESS_ENABLE_ENGINE_TESTS` | `ON` | Register quick engine benchmark in CTest |
-| `CHESS_BUILD_LEGACY_RELAY_SERVER` | `OFF` | Build legacy optional relay server binary |
 | `CHESS_RELEASE_VERSION` | `1.1.0` | Version label used in release package filenames |
 | `CHESS_RELEASE_ARCH` | auto | Architecture label used in release package filenames (`x64`, `arm64`, ...) |
 
@@ -167,7 +151,7 @@ Run benchmark suites:
 ./build-bench/chess_engine_bench --tactics   # tactical-only checks
 ```
 
-Run through CTest:
+Run through CTest (also exercises settings restart, migration, Unicode paths, backup recovery and failed writes):
 
 ```bash
 ctest --test-dir build-bench --output-on-failure
@@ -178,7 +162,7 @@ ctest --test-dir build-bench --output-on-failure
 Build Linux release bundles:
 
 ```bash
-cmake -S . -B build-release-linux -G Ninja -DCHESS_RELEASE_VERSION=1.1.0
+cmake -S . -B build-release-linux -G Ninja -DCMAKE_BUILD_TYPE=Release -DCHESS_RELEASE_VERSION=1.1.0
 cmake --build build-release-linux --target chess_linux_release
 ```
 
@@ -229,48 +213,39 @@ GitHub automation:
 
 ## One-File Packaging (Windows)
 
-Build portable self-extracting executable:
+Build an Inno Setup installer with the executable, assets and its required non-system DLLs:
 
-```bash
-cmake -S . -B build -G Ninja
-cmake --build build --target chess_onefile
+```powershell
+cmake -S . -B build-release-windows -G Ninja -DCMAKE_BUILD_TYPE=Release -DCHESS_WINDOWS_PORTABLE_RUNTIME=ON
+cmake --build build-release-windows
+ctest --test-dir build-release-windows --output-on-failure
+cmake --build build-release-windows --target chess_onefile
 ```
 
-or:
+Or run `tools\package_onefile.bat [version]` from any working directory. The helper builds Release, runs tests, and packages into `build-release-windows/release/`.
 
-```bat
-tools\package_onefile.bat
-```
-
-Versioned package example:
-
-```bash
-cmake -S . -B build -G Ninja -DCHESS_RELEASE_VERSION=1.1.0
-cmake --build build --target chess_onefile
-```
-
-Output:
+Versioned x64 output (the architecture follows the configured target):
 
 ```text
-build/release/chess-windows-x64-v1.1.0.exe
-build/release/chess-windows-x64-v1.1.0.exe.sha256
-build/release/chess.exe
-build/release/chess.exe.sha256
+build-release-windows/release/chess-windows-x64-v1.1.0.exe
+build-release-windows/release/chess-windows-x64-v1.1.0.exe.sha256
+build-release-windows/release/chess.exe
+build-release-windows/release/chess.exe.sha256
 ```
 
-Behavior:
+The installer defaults to Program Files, creates shortcuts and an uninstaller, and reuses the previous installation directory on upgrades. Settings live in the current user's data directory and survive reinstalling or uninstalling the app. Post-install launch uses the original user's credentials. Neither users nor packagers need 7-Zip.
 
-- `chess.exe` extracts a `chess` folder in current run directory
-- Extracted folder contains:
-  - main app executable
-  - full `assets/`
-- End user does **not** need 7-Zip installed to run packaged `chess.exe`
-- 7-Zip is required only at packaging/build time
+Runtime dependency inspection fails the package build if a required DLL is unresolved. Windows system DLLs and unrelated DLLs in the repository are excluded. `runtime_manifest.txt` and the generated `chess_installer.iss` are kept beside the installer for build diagnostics. MSVC packages require `CHESS_WINDOWS_PORTABLE_RUNTIME=ON`.
 
-GitHub automation:
+If Inno Setup is outside PATH, configure with `-DCHESS_ISCC_EXE="C:/path/to/ISCC.exe"`. The legacy `cmake/build_onefile.cmake` entry point delegates to the same installer implementation.
 
-- workflow file: `.github/workflows/release-windows.yml`
-- pushing tag `v1.1.0` builds Windows one-file artifacts and attaches them to the same GitHub Release.
+The Windows release workflow builds and runs engine/storage tests, checks a real install/reinstall/uninstall in a temporary directory, verifies the generated SHA256, and uploads the installer. To run the installer smoke test locally on an account without an existing per-user Chess installation:
+
+```powershell
+./tools/test_windows_installer.ps1 -Installer ./build-release-windows/release/chess.exe -StorageTests ./build-release-windows/chess_storage_tests.exe -TestRoot ./build-release-windows/installer-tests
+```
+
+Add `-TestUI` to exercise changing the theme in the installed app across restarts, including with writes denied to the installation directory. This option requires a Windows desktop session; the game windows are hidden during the test.
 
 ## How To Play
 
@@ -278,7 +253,7 @@ GitHub automation:
 
 - Left click pieces/squares to select and move
 - Use `Menu` button in play screen for leave menu
-- Use settings screen for AI/theme/audio/timer/touch-move/online name
+- Use settings screen for AI/theme/audio/timer/touch-move
 
 ### Play screen behavior
 
@@ -291,35 +266,6 @@ GitHub automation:
 
 - Resizable window
 - Minimum size: `920 x 640`
-
-## Online Mode
-
-Model:
-
-- Direct TCP P2P
-- Invite code encodes host endpoint (`IPv4 + port`, fixed 10-char code)
-- No external dedicated game server required for normal player use
-
-Flow:
-
-1. Player A hosts and gets invite code
-2. Player B joins with invite code
-3. Guest marks `Ready`
-4. Host starts game
-5. Moves exchanged as validated packets
-
-Connectivity notes:
-
-- Internet connectivity is checked before entering online
-- Direct P2P still depends on NAT/firewall reachability
-- Some networks (strict NAT/CGNAT) can block incoming direct connections
-- Detailed error popup text is shown for join/host/connect failures
-
-Session persistence:
-
-- Up to `ONLINE_MATCH_MAX = 6` online sessions tracked
-- Sessions are persisted and can be reopened/reconnected later
-- Active games list is sorted by latest start time
 
 ## AI Details
 
@@ -406,18 +352,19 @@ Font loading order:
 
 ## Settings and Saved Data
 
-Storage location:
+Settings are independent of the executable directory, shortcuts and launch working directory:
 
-```text
-<executable-directory>/settings.dat
-<executable-directory>/online_matches.dat
-```
+| Platform | Settings file |
+|---|---|
+| Windows | `%LOCALAPPDATA%\Chess\settings.dat` |
+| Linux | `$XDG_CONFIG_HOME/chess/settings.dat`, or `$HOME/.config/chess/settings.dat` |
+| macOS | `$HOME/Library/Application Support/Chess/settings.dat` |
 
-Security layer:
+The directory is created automatically. `CHESS_CONFIG_DIR` can override it with an absolute UTF-8 path for isolated testing or custom deployments. Unicode names and long Windows paths are supported.
 
-- `settings.dat` and `online_matches.dat` are written through `secure_io`
-- On Windows: DPAPI user-scoped encryption
-- On non-Windows: XOR obfuscation fallback container
+Changes are saved after a short debounce while adjusting sliders, immediately when leaving Settings, and on normal exit. A failed save is shown in Settings and reported on exit. Saving uses a flushed temporary file in the same directory followed by atomic replacement; the previous valid preferences are kept as `settings.dat.bak`. If the primary file cannot be read, the backup is tried. An unreadable primary and backup are not silently replaced with defaults merely by closing the game.
+
+Windows files use user-scoped DPAPI. Other platforms retain the legacy XOR obfuscation with a checksum for accidental-corruption detection; this is not encryption. Version-1 files and legacy plaintext remain readable.
 
 Important `settings.dat` keys:
 
@@ -433,11 +380,10 @@ Important `settings.dat` keys:
 - `player_name`
 - `wins`
 - `losses`
-- `online_name`
 
 Legacy compatibility:
 
-- If legacy plaintext files exist in working directory, migration is attempted on first run.
+- On first run, an existing settings file beside the executable or in the original launch directory is imported into the user directory without deleting the original. Encrypted and accidentally double-encrypted legacy files are decoded before migration. Existing user settings take precedence over installation-directory files.
 
 ## Architecture
 
@@ -456,19 +402,12 @@ Top-level modules:
   - rendering
   - widgets
   - screen controllers
-- `src/network/`:
-  - TCP socket client
-  - packet protocol
-  - invite-code encode/decode
 - `src/data/`:
+  - per-user paths, legacy migration and backup recovery
+  - UTF-8 file access and atomic writes
   - secure file read/write
 
 Public headers in `include/` define shared contracts.
-
-Optional target:
-
-- `chess_relay_server` can be built with `-DCHESS_BUILD_LEGACY_RELAY_SERVER=ON`
-- Not required for normal direct online gameplay
 
 ## Repository Layout
 
@@ -481,12 +420,13 @@ Optional target:
 |   `-- sfx/
 |-- cmake/
 |-- include/
+|   |-- app_storage.h
 |   |-- audio.h
+|   |-- file_io.h
 |   |-- engine.h
 |   |-- game_state.h
 |   |-- gui.h
 |   |-- main_loop.h
-|   |-- network.h
 |   |-- secure_io.h
 |   `-- types.h
 |-- src/
@@ -495,8 +435,6 @@ Optional target:
 |   |-- engine/
 |   |-- gui/
 |   |   `-- screens/
-|   |-- network/
-|   |   `-- protocol.h
 |   `-- main.c
 |-- tools/
 |-- CMakeLists.txt
@@ -511,8 +449,7 @@ Optional target:
   - no threefold repetition
   - no 50-move rule
   - no insufficient-material auto-draw
-- No external NAT traversal stack (STUN/TURN) for hard NAT cases
-- No full automated CI test/perft suite yet
+- CI runs quick engine and storage regressions; use `--perft` for deeper move-generation validation
 
 ## Troubleshooting
 
@@ -527,28 +464,13 @@ Fix:
 1. Close running game process
 2. Rebuild
 
-### Join handshake timeout in online mode
-
-Cause:
-
-- host unreachable due to NAT/firewall/CGNAT/offline host
-
-Fix:
-
-1. Verify host is running and waiting in room
-2. Check firewall/router rules for host side
-3. Retry on another network if ISP uses strict NAT
-
 ### `chess_onefile` packaging fails
 
-Cause:
+Install Inno Setup 6.3 or newer, or set `CHESS_ISCC_EXE` to its compiler path. Build using Release and the static MSVC runtime. An unresolved DLL error must be fixed before distributing a package; `runtime_manifest.txt` records which files were bundled.
 
-- missing `7z.exe` or `7z.sfx`
+### Settings could not be saved
 
-Fix:
-
-1. Install 7-Zip (full installer)
-2. Re-run `cmake --build build --target chess_onefile`
+The Settings screen displays the actual storage error. Check that the current user's configuration directory is writable and that security software is not blocking atomic file replacement. There is no need to run the game as administrator. If both settings files are damaged, changing a preference explicitly allows new settings to be written; otherwise the unreadable file is preserved.
 
 ## License
 

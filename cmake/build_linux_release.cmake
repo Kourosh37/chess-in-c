@@ -61,6 +61,9 @@ file(MAKE_DIRECTORY "${_stage_chess_dir}")
 
 file(COPY "${CHESS_APP_EXE}" DESTINATION "${_stage_chess_dir}")
 file(COPY "${CHESS_SOURCE_ASSETS}" DESTINATION "${_stage_chess_dir}")
+if(EXISTS "${CHESS_SOURCE_DIR}/LICENSE")
+    file(COPY "${CHESS_SOURCE_DIR}/LICENSE" DESTINATION "${_stage_chess_dir}")
+endif()
 
 set(_launcher_file "${_stage_chess_dir}/run.sh")
 file(WRITE "${_launcher_file}" [=[

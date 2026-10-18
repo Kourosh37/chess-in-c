@@ -360,9 +360,7 @@ static Side board_target_side(const ChessApp* app) {
     if (app->mode == MODE_LOCAL) {
         return app->position.side_to_move;
     }
-    if (app->mode == MODE_ONLINE) {
-        return app->human_side;
-    }
+
     return SIDE_WHITE;
 }
 

@@ -54,7 +54,8 @@ _deps/
 # ------------------------------------------------------------
 profile.dat
 settings.dat
-online_matches.dat
+settings.dat.bak
+settings.dat.tmp-*
 *.log
 
 # OS junk
